@@ -17,10 +17,10 @@ peers = [
 #]
 
 # How often leader sends heartbeat (seconds)
-heartbeat_interval_secs = 5
+heartbeat_interval_secs = 0.1
 
 # If a follower misses this many seconds since last heartbeat, it starts election
-heartbeat_timeout_secs = 12
+heartbeat_timeout_secs = 1
 
 # Duration of a leader term in seconds (default 2 minutes = 120)
 leader_term_secs = 30
