@@ -187,17 +187,41 @@ async fn main() -> anyhow::Result<()> {
                 };
 
                 if end_reached {
-                    {
+                    // Increment term and prepare to broadcast stepping down
+                    let new_term = {
                         let mut ns = shared_clone2.write().await;
                         ns.state = State::Follower;
                         ns.leader = None;
                         ns.term_end = None;
                         ns.last_heartbeat = None;
-                        println!("[TERM] Leader term expired, stepping down");
-                    }
+                        ns.election_term += 1;  // Increment term when stepping down
+                        println!("[TERM] Leader term expired, stepping down to Term {}", ns.election_term);
+                        ns.election_term
+                    };
+                    
                     log_state_change(&shared_clone2, &this_addr_str2).await;
+                    
+                    // FIX 1: Broadcast term expiration to all followers
+                    // This forces followers to clear their leader state and prepare for new election
+                    println!("[TERM] Broadcasting term expiration (Term {}) to all peers", new_term);
+                    for p in peers_clone2.iter() {
+                        let p_s = p.to_string();
+                        if p_s == this_addr_str2 {
+                            continue;
+                        }
+                        // Send LeaderAnnounce with empty leader string to signal term end
+                        let msg = Message::LeaderAnnounce { 
+                            leader: String::new(),  // Empty leader signals stepping down
+                            term_end_unix: 0,       // 0 indicates no active term
+                            election_term: new_term 
+                        };
+                        println!("[TERM] Notifying {} of term expiration | Term: {}", p_s, new_term);
+                        let _ = send_message(p, &msg, cfg_clone2.net_timeout_ms).await;
+                    }
+                    
                     sleep(StdDuration::from_millis(200)).await;
                 }
+                
             }
             sleep(StdDuration::from_millis(cfg_clone2.heartbeat_interval_secs)).await;
         }
@@ -260,23 +284,37 @@ async fn handle_connection(
             // Only accept announcement from current or newer term
             if election_term >= ns.election_term {
                 ns.election_term = election_term;
-                ns.leader = Some(leader.clone());
-                ns.state = State::Follower;
-                ns.last_heartbeat = Some(Instant::now());
-                ns.election_in_progress = false;
                 
-                let now_unix = Utc::now().timestamp() as u64;
-                if term_end_unix > now_unix {
-                    let remaining = term_end_unix - now_unix;
-                    ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+                // Check if this is a "stepping down" message (empty leader)
+                if leader.is_empty() {
+                    // Leader is stepping down, clear state and prepare for election
+                    ns.leader = None;
+                    ns.state = State::Follower;
+                    ns.last_heartbeat = None;  // Force election timeout
+                    ns.term_end = None;
+                    ns.election_in_progress = false;
+                    println!("[ANNOUNCE] Leader stepped down | Term: {} | Clearing leader state", election_term);
+                } else {
+                    // Normal leader announcement
+                    ns.leader = Some(leader.clone());
+                    ns.state = State::Follower;
+                    ns.last_heartbeat = Some(Instant::now());
+                    ns.election_in_progress = false;
+                    
+                    let now_unix = Utc::now().timestamp() as u64;
+                    if term_end_unix > now_unix {
+                        let remaining = term_end_unix - now_unix;
+                        ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+                    }
+                    println!("[ANNOUNCE] New leader: {} | Term: {}", leader, election_term);
                 }
-                println!("[ANNOUNCE] New leader: {} | Term: {}", leader, election_term);
             }
             
             let resp = Message::Ping;
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
         }
+        
         Message::CpuResp { .. } => {}
         Message::Ping => {
             let resp = Message::Ping;
