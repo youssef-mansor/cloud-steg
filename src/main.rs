@@ -148,11 +148,11 @@ async fn main() -> anyhow::Result<()> {
                 if ns.state == State::Follower {
                     let should_elect = if let Some(last) = ns.last_heartbeat {
                         // print for debug
-                        println!("Last heartbeat received, elapsed: {} ms", last.elapsed().as_millis());
+                        println!("Last heartbeat received, elapsed: {} ms, current term: {}", last.elapsed().as_millis(), ns.current_term);
                         last.elapsed().as_millis() as u64 >= cfg_clone.heartbeat_timeout_ms
                     } else {
                         // print for debug
-                        println!("No heartbeat received yet, elapsed: {} ms", ns.startup_time.elapsed().as_millis());
+                        println!("No heartbeat received yet, elapsed: {} ms, current term: {}", ns.startup_time.elapsed().as_millis(), ns.current_term);
                         // Wait 2x timeout before first election attempt
                         ns.startup_time.elapsed().as_millis() as u64 >= (cfg_clone.heartbeat_timeout_ms * 2)
 
@@ -413,10 +413,11 @@ async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64) -> anyhow::R
     }
 
     let resp: Message = serde_json::from_str(buf.trim())?;
-    if let Message::CpuResp { cpu_percent, .. } = resp {
-        println!("[CPU Request] Received CPU {}% from {}", cpu_percent, addr);
+    if let Message::CpuResp { cpu_percent, term, .. } = resp {
+        println!("[CPU Request] Received CPU {}% from {} (term: {})", cpu_percent, addr, term);
         Ok(cpu_percent)
-    } else {
+    }
+    else {
         eprintln!("[CPU Request] Unexpected response from {}", addr);
         anyhow::bail!("unexpected response from {}", addr);
     }
