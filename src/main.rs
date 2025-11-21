@@ -139,10 +139,15 @@ async fn main() -> anyhow::Result<()> {
                 let ns = shared_clone.read().await;
                 if ns.state == State::Follower {
                     let should_elect = if let Some(last) = ns.last_heartbeat {
+                        // print for debug
+                        println!("Last heartbeat received, elapsed: {} ms", last.elapsed().as_millis());
                         last.elapsed().as_millis() as u64 >= cfg_clone.heartbeat_timeout_ms
                     } else {
+                        // print for debug
+                        println!("No heartbeat received yet, elapsed: {} ms", ns.startup_time.elapsed().as_millis());
                         // Wait 2x timeout before first election attempt
                         ns.startup_time.elapsed().as_millis() as u64 >= (cfg_clone.heartbeat_timeout_ms * 2)
+
                     };
                     if should_elect {
                         drop(ns);
