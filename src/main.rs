@@ -58,6 +58,7 @@ struct NodeState {
     leader: Option<String>,
     last_heartbeat: Option<Instant>,
     term_end: Option<Instant>,
+    startup_time: Instant,
 }
 
 #[tokio::main]
@@ -86,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
         leader: None,
         last_heartbeat: None,
         term_end: None,
+        startup_time: Instant::now(),
     }));
 
     let cpu = Arc::new(RwLock::new(0f32));
@@ -139,7 +141,8 @@ async fn main() -> anyhow::Result<()> {
                     let should_elect = if let Some(last) = ns.last_heartbeat {
                         last.elapsed().as_millis() as u64 >= cfg_clone.heartbeat_timeout_ms
                     } else {
-                        true
+                        // Wait 2x timeout before first election attempt
+                        ns.startup_time.elapsed().as_millis() as u64 >= (cfg_clone.heartbeat_timeout_ms * 2)
                     };
                     if should_elect {
                         drop(ns);
