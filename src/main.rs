@@ -188,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
                     sleep(StdDuration::from_millis(200)).await;
                 }
             }
-            sleep(StdDuration::from_secs(cfg_clone2.heartbeat_interval_secs)).await;
+            sleep(StdDuration::from_millis(cfg_clone2.heartbeat_interval_secs)).await;
         }
     });
 
@@ -309,7 +309,7 @@ async fn run_election(
                 let mut ns = shared.write().await;
                 ns.state = State::Leader;
                 ns.leader = Some(this_addr_str.to_string());
-                ns.term_end = Some(Instant::now() + StdDuration::from_secs(cfg.leader_term_secs));
+                ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_secs));
                 ns.last_heartbeat = Some(Instant::now());
             }
             broadcast_leader(&peers, &this_addr_str, term_end_unix, cfg.net_timeout_ms).await;
@@ -317,7 +317,7 @@ async fn run_election(
             let mut ns = shared.write().await;
             ns.state = State::Follower;
             ns.leader = Some(leader_addr.clone());
-            ns.term_end = Some(Instant::now() + StdDuration::from_secs(cfg.leader_term_secs));
+            ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_secs));
             ns.last_heartbeat = Some(Instant::now());
         }
     }

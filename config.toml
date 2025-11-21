@@ -16,14 +16,14 @@ peers = [
 #  "127.0.0.1:3003",
 #]
 
-# How often leader sends heartbeat (seconds)
-heartbeat_interval_secs = 0.1
+# How often leader sends heartbeat (milliseconds)
+heartbeat_interval_secs = 500
 
-# If a follower misses this many seconds since last heartbeat, it starts election
-heartbeat_timeout_secs = 1
+# If a follower misses this many milliseconds since last heartbeat, it starts election
+heartbeat_timeout_secs = 1000
 
-# Duration of a leader term in seconds (default 2 minutes = 120)
-leader_term_secs = 30
+# Duration of a leader term in milliseconds (default 2 minutes = 120,000)
+leader_term_secs = 30000
 
 # Timeout for network operations (milliseconds)
 net_timeout_ms = 1000
