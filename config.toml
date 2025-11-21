@@ -1,0 +1,35 @@
+# Edit this file to change IPs, ports and timing
+
+# This node's address (must match one of the peers below for each server)
+this_node = "10.40.44.249:5000"
+# this_node = "127.0.0.1:3003"
+
+# List of all cluster peers (including this node)
+peers = [
+ "10.40.6.26:5000",
+ "10.40.7.1:5000",
+ "10.40.44.249:5000",
+]
+#peers = [
+#  "127.0.0.1:3001",
+#  "127.0.0.1:3002",
+#  "127.0.0.1:3003",
+#]
+
+# How often leader sends heartbeat (seconds)
+heartbeat_interval_secs = 5
+
+# If a follower misses this many seconds since last heartbeat, it starts election
+heartbeat_timeout_secs = 12
+
+# Duration of a leader term in seconds (default 2 minutes = 120)
+leader_term_secs = 30
+
+# Timeout for network operations (milliseconds)
+net_timeout_ms = 1000
+
+# How often to refresh local CPU measurement (ms)
+cpu_refresh_ms = 500
+
+# Election retry wait (ms) - wait between retries to contact peers
+election_retry_ms = 200

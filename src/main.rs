@@ -1,0 +1,424 @@
+use anyhow::Context;
+use clap::Parser;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Instant;
+use sysinfo::{CpuExt, System, SystemExt};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
+use tokio::time::sleep;
+use chrono::Utc;
+use std::time::Duration as StdDuration;
+use chrono::Duration as ChronoDuration;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[clap(long, default_value = "config.toml")]
+    config: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct Config {
+    this_node: String,
+    peers: Vec<String>,
+    heartbeat_interval_secs: u64,
+    heartbeat_timeout_secs: u64,
+    leader_term_secs: u64,
+    net_timeout_ms: u64,
+    cpu_refresh_ms: u64,
+    election_retry_ms: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "type")]
+enum Message {
+    Heartbeat { leader: String, term_end_unix: u64 },
+    GetCpu,
+    CpuResp { cpu_percent: f32, addr: String },
+    LeaderAnnounce { leader: String, term_end_unix: u64 },
+    Ping,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum State {
+    Follower,
+    Leader,
+}
+
+#[derive(Debug)]
+struct NodeState {
+    state: State,
+    leader: Option<String>,
+    last_heartbeat: Option<Instant>,
+    term_end: Option<Instant>,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    let cfg_text = fs::read_to_string(&args.config).context("read config")?;
+    let cfg: Config = toml::from_str(&cfg_text).context("parse config")?;
+
+    let this_addr: SocketAddr = cfg.this_node.parse().context("parse this_node as SocketAddr")?;
+
+    println!("Starting node {}", this_addr);
+
+    let peers: Vec<SocketAddr> = cfg
+        .peers
+        .iter()
+        .map(|s| s.parse().expect("invalid peer addr in config"))
+        .collect();
+
+    let shared = Arc::new(RwLock::new(NodeState {
+        state: State::Follower,
+        leader: None,
+        last_heartbeat: None,
+        term_end: None,
+    }));
+
+    let cpu = Arc::new(RwLock::new(0f32));
+    let cpu_clone = cpu.clone();
+    let cpu_refresh = cfg.cpu_refresh_ms;
+    tokio::spawn(async move {
+        let mut sys = System::new_all();
+        loop {
+            sys.refresh_cpu();
+            let avg = sys.cpus().iter().map(|c| c.cpu_usage()).sum::<f32>()
+                / (sys.cpus().len() as f32);
+            {
+                let mut w = cpu_clone.write().await;
+                *w = avg;
+            }
+            sleep(StdDuration::from_millis(cpu_refresh)).await;
+        }
+    });
+
+    let listener = TcpListener::bind(this_addr).await?;
+    let listener_shared = shared.clone();
+    let cpu_for_handler = cpu.clone();
+    tokio::spawn(async move {
+        loop {
+            match listener.accept().await {
+                Ok((stream, addr)) => {
+                    let s = listener_shared.clone();
+                    let c = cpu_for_handler.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_connection(stream, s, c).await {
+                            eprintln!("handler error from {}: {}", addr, e);
+                        }
+                    });
+                }
+                Err(e) => {
+                    eprintln!("accept error: {}", e);
+                }
+            }
+        }
+    });
+
+    let shared_clone = shared.clone();
+    let peers_clone = peers.clone();
+    let cfg_clone = cfg.clone();
+    let this_addr_str = cfg.this_node.clone();
+    tokio::spawn(async move {
+        loop {
+            {
+                let ns = shared_clone.read().await;
+                if ns.state == State::Follower {
+                    let should_elect = if let Some(last) = ns.last_heartbeat {
+                        last.elapsed().as_secs() >= cfg_clone.heartbeat_timeout_secs
+                    } else {
+                        true
+                    };
+                    if should_elect {
+                        drop(ns);
+                        if let Err(e) =
+                            run_election(&peers_clone, &this_addr_str, &cfg_clone, shared_clone.clone(), cpu.clone()).await
+                        {
+                            eprintln!("election failed: {}", e);
+                        }
+                    }
+                }
+            }
+            sleep(StdDuration::from_millis(500)).await;
+        }
+    });
+
+    let shared_clone2 = shared.clone();
+    let peers_clone2 = peers.clone();
+    let cfg_clone2 = cfg.clone();
+    let this_addr_str2 = cfg.this_node.clone();
+    tokio::spawn(async move {
+        loop {
+            let is_leader = {
+                let ns = shared_clone2.read().await;
+                ns.state == State::Leader
+            };
+            if is_leader {
+                send_heartbeat_to_peers(&peers_clone2, &this_addr_str2, &cfg_clone2, shared_clone2.clone()).await;
+
+                let end_reached = {
+                    let ns = shared_clone2.read().await;
+                    if let Some(end) = ns.term_end {
+                        Instant::now() >= end
+                    } else {
+                        false
+                    }
+                };
+
+                if end_reached {
+                    {
+                        let mut ns = shared_clone2.write().await;
+                        ns.state = State::Follower;
+                        ns.leader = None;
+                        ns.term_end = None;
+                        ns.last_heartbeat = None;
+                    }
+                    sleep(StdDuration::from_millis(200)).await;
+                }
+            }
+            sleep(StdDuration::from_secs(cfg_clone2.heartbeat_interval_secs)).await;
+        }
+    });
+
+    loop {
+        sleep(StdDuration::from_secs(60)).await;
+    }
+}
+
+async fn handle_connection(
+    mut stream: TcpStream,
+    shared: Arc<RwLock<NodeState>>,
+    cpu: Arc<RwLock<f32>>,
+) -> anyhow::Result<()> {
+    let peer = stream.peer_addr()?;
+    let (r, mut w) = stream.split();
+    let mut reader = BufReader::new(r);
+    let mut buf = String::new();
+    let n = reader.read_line(&mut buf).await?;
+    if n == 0 {
+        return Ok(());
+    }
+    let msg: Message = serde_json::from_str(buf.trim()).context("parse incoming json")?;
+    match msg {
+        Message::Heartbeat { leader, term_end_unix } => {
+            let mut ns = shared.write().await;
+            ns.last_heartbeat = Some(Instant::now());
+            ns.leader = Some(leader.clone());
+            ns.term_end = Some(Instant::now() + StdDuration::from_secs(0));
+
+            let now_unix = Utc::now().timestamp() as u64;
+            if term_end_unix > now_unix {
+                let remaining = term_end_unix - now_unix;
+                ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+            }
+
+            let resp = Message::Ping;
+            let s = serde_json::to_string(&resp)? + "\n";
+            w.write_all(s.as_bytes()).await?;
+        }
+        Message::GetCpu => {
+            let val = { *cpu.read().await };
+            let resp = Message::CpuResp { cpu_percent: val, addr: peer.to_string() };
+            let s = serde_json::to_string(&resp)? + "\n";
+            w.write_all(s.as_bytes()).await?;
+        }
+        Message::LeaderAnnounce { leader, term_end_unix } => {
+            let mut ns = shared.write().await;
+            ns.leader = Some(leader);
+            let now_unix = Utc::now().timestamp() as u64;
+            if term_end_unix > now_unix {
+                let remaining = term_end_unix - now_unix;
+                ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+            } else {
+                ns.term_end = None;
+            }
+            ns.state = State::Follower;
+            ns.last_heartbeat = Some(Instant::now());
+            let resp = Message::Ping;
+            let s = serde_json::to_string(&resp)? + "\n";
+            w.write_all(s.as_bytes()).await?;
+        }
+        Message::CpuResp { .. } => {}
+        Message::Ping => {
+            let resp = Message::Ping;
+            let s = serde_json::to_string(&resp)? + "\n";
+            w.write_all(s.as_bytes()).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn run_election(
+    peers: &[SocketAddr],
+    this_addr_str: &str,
+    cfg: &Config,
+    shared: Arc<RwLock<NodeState>>,
+    cpu: Arc<RwLock<f32>>,
+) -> anyhow::Result<()> {
+    println!("Starting election from {}", this_addr_str);
+    let mut collected: HashMap<String, f32> = HashMap::new();
+    collected.insert(this_addr_str.to_string(), *cpu.read().await);
+
+    for p in peers.iter() {
+        let p_s = p.to_string();
+        if p_s == this_addr_str {
+            continue;
+        }
+        match request_cpu(p, cfg.net_timeout_ms).await {
+            Ok(val) => {
+                collected.insert(p_s.clone(), val);
+            }
+            Err(e) => {
+                eprintln!("failed to get cpu from {}: {}", p, e);
+            }
+        }
+        sleep(StdDuration::from_millis(cfg.election_retry_ms)).await;
+    }
+
+    let mut chosen = None;
+    for (addr, cpu_val) in collected.iter() {
+        match &chosen {
+            None => chosen = Some((addr.clone(), *cpu_val)),
+            Some((caddr, cval)) => {
+                if *cpu_val < *cval || (*cpu_val == *cval && addr < caddr) {
+                    chosen = Some((addr.clone(), *cpu_val));
+                }
+            }
+        }
+    }
+
+    if let Some((leader_addr, _)) = chosen {
+        println!("Election result: leader -> {}", leader_addr);
+        let term_end_unix =
+            (Utc::now() + ChronoDuration::seconds(cfg.leader_term_secs as i64)).timestamp() as u64;
+
+        if leader_addr == this_addr_str {
+            {
+                let mut ns = shared.write().await;
+                ns.state = State::Leader;
+                ns.leader = Some(this_addr_str.to_string());
+                ns.term_end = Some(Instant::now() + StdDuration::from_secs(cfg.leader_term_secs));
+                ns.last_heartbeat = Some(Instant::now());
+            }
+            broadcast_leader(&peers, &this_addr_str, term_end_unix, cfg.net_timeout_ms).await;
+        } else {
+            let mut ns = shared.write().await;
+            ns.state = State::Follower;
+            ns.leader = Some(leader_addr.clone());
+            ns.term_end = Some(Instant::now() + StdDuration::from_secs(cfg.leader_term_secs));
+            ns.last_heartbeat = Some(Instant::now());
+        }
+    }
+
+    Ok(())
+}
+
+async fn request_cpu(peer: &SocketAddr, timeout_ms: u64) -> anyhow::Result<f32> {
+    let addr = peer.to_string();
+    println!("[CPU Request] Connecting to {}", addr);
+    let connect =
+        tokio::time::timeout(StdDuration::from_millis(timeout_ms), TcpStream::connect(peer)).await;
+    let mut stream = match connect {
+        Ok(Ok(s)) => {
+            println!("[CPU Request] Connected to {}", addr);
+            s
+        }
+        _ => {
+            eprintln!("[CPU Request] Failed to connect or timeout to {}", addr);
+            anyhow::bail!("connect timeout or failed to {}", addr)
+        }
+    };
+
+    let msg = Message::GetCpu;
+    let s = serde_json::to_string(&msg)? + "\n";
+    stream.write_all(s.as_bytes()).await?;
+    println!("[CPU Request] Sent GetCpu to {}", addr);
+
+    let mut reader = BufReader::new(stream);
+    let mut buf = String::new();
+    let n = tokio::time::timeout(StdDuration::from_millis(timeout_ms), reader.read_line(&mut buf))
+        .await??;
+
+    if n == 0 {
+        eprintln!("[CPU Request] No response from {}", addr);
+        anyhow::bail!("no response from {}", addr);
+    }
+
+    let resp: Message = serde_json::from_str(buf.trim())?;
+    if let Message::CpuResp { cpu_percent, .. } = resp {
+        println!("[CPU Request] Received CPU {}% from {}", cpu_percent, addr);
+        Ok(cpu_percent)
+    } else {
+        eprintln!("[CPU Request] Unexpected response from {}", addr);
+        anyhow::bail!("unexpected response from {}", addr);
+    }
+}
+
+
+async fn broadcast_leader(peers: &[SocketAddr], leader: &str, term_end_unix: u64, timeout_ms: u64) {
+    for p in peers.iter() {
+        let p_s = p.to_string();
+        if p_s == leader {
+            continue;
+        }
+        let leader_s = leader.to_string();
+        let msg = Message::LeaderAnnounce { leader: leader_s.clone(), term_end_unix };
+        let _ = send_message(p, &msg, timeout_ms).await;
+    }
+}
+
+async fn send_heartbeat_to_peers(
+    peers: &[SocketAddr],
+    leader: &str,
+    cfg: &Config,
+    shared: Arc<RwLock<NodeState>>,
+) {
+    let term_end_unix =
+        (Utc::now() + ChronoDuration::seconds(cfg.leader_term_secs as i64)).timestamp() as u64;
+    for p in peers.iter() {
+        let p_s = p.to_string();
+        if p_s == leader {
+            continue;
+        }
+        let msg = Message::Heartbeat { leader: leader.to_string(), term_end_unix };
+        let _ = send_message(p, &msg, cfg.net_timeout_ms).await;
+    }
+}
+
+async fn send_message(peer: &SocketAddr, msg: &Message, timeout_ms: u64) -> anyhow::Result<()> {
+    let addr = peer.to_string();
+    println!("[Send] Connecting to {}", addr);
+    let connect =
+        tokio::time::timeout(StdDuration::from_millis(timeout_ms), TcpStream::connect(peer)).await;
+
+    let mut stream = match connect {
+        Ok(Ok(s)) => {
+            println!("[Send] Connected to {}", addr);
+            s
+        }
+        _ => {
+            eprintln!("[Send] Failed to connect or timeout to {}", addr);
+            anyhow::bail!("connect timeout or failed to {}", addr)
+        }
+    };
+
+    let s = serde_json::to_string(msg)? + "\n";
+    stream.write_all(s.as_bytes()).await?;
+    println!("[Send] Sent message to {}", addr);
+
+    let mut reader = BufReader::new(stream);
+    let mut buf = String::new();
+    let res = tokio::time::timeout(StdDuration::from_millis(timeout_ms), reader.read_line(&mut buf)).await;
+
+    match res {
+        Ok(Ok(0)) => println!("[Send] No response received from {}", addr),
+        Ok(Ok(_)) => println!("[Send] Received response from {}", addr),
+        _ => eprintln!("[Send] Timeout or error receiving response from {}", addr),
+    }
+
+    Ok(())
+}
