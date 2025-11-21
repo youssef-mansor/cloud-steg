@@ -28,9 +28,9 @@ struct Args {
 struct Config {
     this_node: String,
     peers: Vec<String>,
-    heartbeat_interval_secs: u64,
-    heartbeat_timeout_secs: u64,
-    leader_term_secs: u64,
+    heartbeat_interval_ms: u64,
+    heartbeat_timeout_ms: u64,
+    leader_term_ms: u64,
     net_timeout_ms: u64,
     cpu_refresh_ms: u64,
     election_retry_ms: u64,
@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
                 let ns = shared_clone.read().await;
                 if ns.state == State::Follower {
                     let should_elect = if let Some(last) = ns.last_heartbeat {
-                        last.elapsed().as_secs() >= cfg_clone.heartbeat_timeout_secs
+                        last.elapsed().as_millis() as u64 >= cfg_clone.heartbeat_timeout_ms
                     } else {
                         true
                     };
@@ -188,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
                     sleep(StdDuration::from_millis(200)).await;
                 }
             }
-            sleep(StdDuration::from_millis(cfg_clone2.heartbeat_interval_secs)).await;
+            sleep(StdDuration::from_millis(cfg_clone2.heartbeat_interval_ms)).await;
         }
     });
 
@@ -216,7 +216,7 @@ async fn handle_connection(
             let mut ns = shared.write().await;
             ns.last_heartbeat = Some(Instant::now());
             ns.leader = Some(leader.clone());
-            ns.term_end = Some(Instant::now() + StdDuration::from_secs(0));
+            ns.term_end = Some(Instant::now() + StdDuration::from_millis(0));
 
             let now_unix = Utc::now().timestamp() as u64;
             if term_end_unix > now_unix {
@@ -302,14 +302,14 @@ async fn run_election(
     if let Some((leader_addr, _)) = chosen {
         println!("Election result: leader -> {}", leader_addr);
         let term_end_unix =
-            (Utc::now() + ChronoDuration::seconds(cfg.leader_term_secs as i64)).timestamp() as u64;
+            (Utc::now() + ChronoDuration::milliseconds(cfg.leader_term_ms as i64)).timestamp() as u64;
 
         if leader_addr == this_addr_str {
             {
                 let mut ns = shared.write().await;
                 ns.state = State::Leader;
                 ns.leader = Some(this_addr_str.to_string());
-                ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_secs));
+                ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_ms));
                 ns.last_heartbeat = Some(Instant::now());
             }
             broadcast_leader(&peers, &this_addr_str, term_end_unix, cfg.net_timeout_ms).await;
@@ -317,7 +317,7 @@ async fn run_election(
             let mut ns = shared.write().await;
             ns.state = State::Follower;
             ns.leader = Some(leader_addr.clone());
-            ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_secs));
+            ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_ms));
             ns.last_heartbeat = Some(Instant::now());
         }
     }
@@ -366,7 +366,6 @@ async fn request_cpu(peer: &SocketAddr, timeout_ms: u64) -> anyhow::Result<f32> 
     }
 }
 
-
 async fn broadcast_leader(peers: &[SocketAddr], leader: &str, term_end_unix: u64, timeout_ms: u64) {
     for p in peers.iter() {
         let p_s = p.to_string();
@@ -386,7 +385,7 @@ async fn send_heartbeat_to_peers(
     shared: Arc<RwLock<NodeState>>,
 ) {
     let term_end_unix =
-        (Utc::now() + ChronoDuration::seconds(cfg.leader_term_secs as i64)).timestamp() as u64;
+        (Utc::now() + ChronoDuration::milliseconds(cfg.leader_term_ms as i64)).timestamp() as u64;
     for p in peers.iter() {
         let p_s = p.to_string();
         if p_s == leader {
