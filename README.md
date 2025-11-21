@@ -1,4 +1,4 @@
 # cloud-steg
 
 **Run Command**
-cargo run --release -- --config config.toml
+cargo run -- --config config.toml --this-node <ip>
