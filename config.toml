@@ -1,7 +1,7 @@
 # Edit this file to change IPs, ports and timing
 
 # This node's address (must match one of the peers below for each server)
-this_node = "10.40.44.249:5000"
+this_node = ""
 # this_node = "127.0.0.1:3003"
 
 # List of all cluster peers (including this node)

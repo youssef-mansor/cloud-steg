@@ -19,6 +19,9 @@ use chrono::Duration as ChronoDuration;
 struct Args {
     #[clap(long, default_value = "config.toml")]
     config: String,
+
+    #[clap(long)]
+    this_node: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -61,7 +64,12 @@ struct NodeState {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let cfg_text = fs::read_to_string(&args.config).context("read config")?;
-    let cfg: Config = toml::from_str(&cfg_text).context("parse config")?;
+    let mut cfg: Config = toml::from_str(&cfg_text).context("parse config")?;
+
+    // override this_node if provided
+    if let Some(node) = args.this_node {
+        cfg.this_node = node;
+    }
 
     let this_addr: SocketAddr = cfg.this_node.parse().context("parse this_node as SocketAddr")?;
 
