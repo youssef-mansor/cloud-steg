@@ -15,6 +15,7 @@ use chrono::Utc;
 use std::time::Duration as StdDuration;
 use chrono::Duration as ChronoDuration;
 
+
 #[derive(Parser, Debug)]
 struct Args {
     #[clap(long, default_value = "config.toml")]
@@ -23,6 +24,7 @@ struct Args {
     #[clap(long)]
     this_node: Option<String>,
 }
+
 
 #[derive(Deserialize, Debug, Clone)]
 struct Config {
@@ -36,21 +38,24 @@ struct Config {
     election_retry_ms: u64,
 }
 
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 enum Message {
-    Heartbeat { leader: String, term_end_unix: u64 },
-    GetCpu,
-    CpuResp { cpu_percent: f32, addr: String },
-    LeaderAnnounce { leader: String, term_end_unix: u64 },
+    Heartbeat { leader: String, term_end_unix: u64, term: u64 },
+    GetCpu { term: u64 },
+    CpuResp { cpu_percent: f32, addr: String, term: u64 },
+    LeaderAnnounce { leader: String, term_end_unix: u64, term: u64 },
     Ping,
 }
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum State {
     Follower,
     Leader,
 }
+
 
 #[derive(Debug)]
 struct NodeState {
@@ -59,7 +64,9 @@ struct NodeState {
     last_heartbeat: Option<Instant>,
     term_end: Option<Instant>,
     startup_time: Instant,
+    current_term: u64,
 }
+
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -88,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
         last_heartbeat: None,
         term_end: None,
         startup_time: Instant::now(),
+        current_term: 0,
     }));
 
     let cpu = Arc::new(RwLock::new(0f32));
@@ -205,6 +213,7 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+
 async fn handle_connection(
     mut stream: TcpStream,
     shared: Arc<RwLock<NodeState>>,
@@ -220,40 +229,70 @@ async fn handle_connection(
     }
     let msg: Message = serde_json::from_str(buf.trim()).context("parse incoming json")?;
     match msg {
-        Message::Heartbeat { leader, term_end_unix } => {
+        Message::Heartbeat { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
-            ns.last_heartbeat = Some(Instant::now());
-            ns.leader = Some(leader.clone());
-            ns.term_end = Some(Instant::now() + StdDuration::from_millis(0));
+            
+            // Only accept heartbeats from current or higher term
+            if term >= ns.current_term {
+                // If higher term, update and step down if leader
+                if term > ns.current_term {
+                    ns.current_term = term;
+                    if ns.state == State::Leader {
+                        println!("Stepping down: received heartbeat from higher term {}", term);
+                        ns.state = State::Follower;
+                    }
+                }
+                
+                ns.last_heartbeat = Some(Instant::now());
+                ns.leader = Some(leader.clone());
+                ns.term_end = Some(Instant::now() + StdDuration::from_millis(0));
 
-            let now_unix = Utc::now().timestamp() as u64;
-            if term_end_unix > now_unix {
-                let remaining = term_end_unix - now_unix;
-                ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+                let now_unix = Utc::now().timestamp() as u64;
+                if term_end_unix > now_unix {
+                    let remaining = term_end_unix - now_unix;
+                    ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+                }
+            } else {
+                println!("Rejected heartbeat from term {} (current term: {})", term, ns.current_term);
             }
 
             let resp = Message::Ping;
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
         }
-        Message::GetCpu => {
+        Message::GetCpu { term } => {
             let val = { *cpu.read().await };
-            let resp = Message::CpuResp { cpu_percent: val, addr: peer.to_string() };
+            let resp = Message::CpuResp { cpu_percent: val, addr: peer.to_string(), term };
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
         }
-        Message::LeaderAnnounce { leader, term_end_unix } => {
+        Message::LeaderAnnounce { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
-            ns.leader = Some(leader);
-            let now_unix = Utc::now().timestamp() as u64;
-            if term_end_unix > now_unix {
-                let remaining = term_end_unix - now_unix;
-                ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+            
+            // Only accept announcements from current or higher term
+            if term >= ns.current_term {
+                if term > ns.current_term {
+                    ns.current_term = term;
+                    if ns.state == State::Leader {
+                        println!("Stepping down: received leader announce from higher term {}", term);
+                        ns.state = State::Follower;
+                    }
+                }
+                
+                ns.leader = Some(leader);
+                let now_unix = Utc::now().timestamp() as u64;
+                if term_end_unix > now_unix {
+                    let remaining = term_end_unix - now_unix;
+                    ns.term_end = Some(Instant::now() + StdDuration::from_secs(remaining));
+                } else {
+                    ns.term_end = None;
+                }
+                ns.state = State::Follower;
+                ns.last_heartbeat = Some(Instant::now());
             } else {
-                ns.term_end = None;
+                println!("Rejected leader announce from term {} (current term: {})", term, ns.current_term);
             }
-            ns.state = State::Follower;
-            ns.last_heartbeat = Some(Instant::now());
+            
             let resp = Message::Ping;
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
@@ -268,6 +307,7 @@ async fn handle_connection(
     Ok(())
 }
 
+
 async fn run_election(
     peers: &[SocketAddr],
     this_addr_str: &str,
@@ -275,7 +315,14 @@ async fn run_election(
     shared: Arc<RwLock<NodeState>>,
     cpu: Arc<RwLock<f32>>,
 ) -> anyhow::Result<()> {
-    println!("Starting election from {}", this_addr_str);
+    // Increment term at start of election
+    let election_term = {
+        let mut ns = shared.write().await;
+        ns.current_term += 1;
+        ns.current_term
+    };
+    
+    println!("Starting election from {} for term {}", this_addr_str, election_term);
     let mut collected: HashMap<String, f32> = HashMap::new();
     collected.insert(this_addr_str.to_string(), *cpu.read().await);
 
@@ -284,7 +331,7 @@ async fn run_election(
         if p_s == this_addr_str {
             continue;
         }
-        match request_cpu(p, cfg.net_timeout_ms).await {
+        match request_cpu(p, cfg.net_timeout_ms, election_term).await {
             Ok(val) => {
                 collected.insert(p_s.clone(), val);
             }
@@ -308,7 +355,7 @@ async fn run_election(
     }
 
     if let Some((leader_addr, _)) = chosen {
-        println!("Election result: leader -> {}", leader_addr);
+        println!("Election result: leader -> {} (term {})", leader_addr, election_term);
         let term_end_unix =
             (Utc::now() + ChronoDuration::milliseconds(cfg.leader_term_ms as i64)).timestamp() as u64;
 
@@ -320,7 +367,7 @@ async fn run_election(
                 ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_ms));
                 ns.last_heartbeat = Some(Instant::now());
             }
-            broadcast_leader(&peers, &this_addr_str, term_end_unix, cfg.net_timeout_ms).await;
+            broadcast_leader(&peers, &this_addr_str, term_end_unix, election_term, cfg.net_timeout_ms).await;
         } else {
             let mut ns = shared.write().await;
             ns.state = State::Follower;
@@ -333,7 +380,8 @@ async fn run_election(
     Ok(())
 }
 
-async fn request_cpu(peer: &SocketAddr, timeout_ms: u64) -> anyhow::Result<f32> {
+
+async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64) -> anyhow::Result<f32> {
     let addr = peer.to_string();
     println!("[CPU Request] Connecting to {}", addr);
     let connect =
@@ -349,7 +397,7 @@ async fn request_cpu(peer: &SocketAddr, timeout_ms: u64) -> anyhow::Result<f32> 
         }
     };
 
-    let msg = Message::GetCpu;
+    let msg = Message::GetCpu { term };
     let s = serde_json::to_string(&msg)? + "\n";
     stream.write_all(s.as_bytes()).await?;
     println!("[CPU Request] Sent GetCpu to {}", addr);
@@ -374,17 +422,19 @@ async fn request_cpu(peer: &SocketAddr, timeout_ms: u64) -> anyhow::Result<f32> 
     }
 }
 
-async fn broadcast_leader(peers: &[SocketAddr], leader: &str, term_end_unix: u64, timeout_ms: u64) {
+
+async fn broadcast_leader(peers: &[SocketAddr], leader: &str, term_end_unix: u64, term: u64, timeout_ms: u64) {
     for p in peers.iter() {
         let p_s = p.to_string();
         if p_s == leader {
             continue;
         }
         let leader_s = leader.to_string();
-        let msg = Message::LeaderAnnounce { leader: leader_s.clone(), term_end_unix };
+        let msg = Message::LeaderAnnounce { leader: leader_s.clone(), term_end_unix, term };
         let _ = send_message(p, &msg, timeout_ms).await;
     }
 }
+
 
 async fn send_heartbeat_to_peers(
     peers: &[SocketAddr],
@@ -392,17 +442,22 @@ async fn send_heartbeat_to_peers(
     cfg: &Config,
     shared: Arc<RwLock<NodeState>>,
 ) {
-    let term_end_unix =
-        (Utc::now() + ChronoDuration::milliseconds(cfg.leader_term_ms as i64)).timestamp() as u64;
+    let (term_end_unix, current_term) = {
+        let ns = shared.read().await;
+        let term_end = (Utc::now() + ChronoDuration::milliseconds(cfg.leader_term_ms as i64)).timestamp() as u64;
+        (term_end, ns.current_term)
+    };
+    
     for p in peers.iter() {
         let p_s = p.to_string();
         if p_s == leader {
             continue;
         }
-        let msg = Message::Heartbeat { leader: leader.to_string(), term_end_unix };
+        let msg = Message::Heartbeat { leader: leader.to_string(), term_end_unix, term: current_term };
         let _ = send_message(p, &msg, cfg.net_timeout_ms).await;
     }
 }
+
 
 async fn send_message(peer: &SocketAddr, msg: &Message, timeout_ms: u64) -> anyhow::Result<()> {
     let addr = peer.to_string();
