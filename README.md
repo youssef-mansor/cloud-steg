@@ -6,7 +6,7 @@ A Rust-based peer-to-peer discovery system with a server that tracks user presen
 
 - **Server**: Actix-web based discovery server with persistent user storage
 - **Client**: CLI tool for registration, heartbeats, and discovery
-- **Heartbeat-based presence**: Users are considered online based on TTL (default 3s)
+- **Heartbeat-based presence**: Users are considered online based on TTL (default 10s)
 - **No unregister**: Presence is managed entirely through heartbeats
 
 ## Project Structure
@@ -75,10 +75,12 @@ The server will start on `http://0.0.0.0:8000`.
 ./client/target/release/p2p-client start-heartbeat \
   --username alice \
   --server http://localhost:8000 \
-  --interval 5
+  --interval 5 \
+  --ip 192.168.1.100 \
+  --port 9000
 ```
 
-This will send a heartbeat every 5 seconds until you press CTRL+C.
+This will send a heartbeat every 5 seconds until you press CTRL+C. The `--ip` and `--port` are the client's own IP address and port that other clients will use to connect for P2P communication.
 
 #### List online users
 
@@ -131,12 +133,14 @@ Register a new user.
 
 ### POST /heartbeat
 
-Send a heartbeat to update presence.
+Send a heartbeat to update presence with IP and port information.
 
 **Request:**
 ```json
 {
-  "username": "alice"
+  "username": "alice",
+  "ip": "192.168.1.100",
+  "port": 9000
 }
 ```
 
@@ -150,12 +154,23 @@ Send a heartbeat to update presence.
 
 ### GET /discovery/online
 
-Get list of online users (last_seen within TTL).
+Get list of online users (last_seen within TTL) with their IP addresses and ports.
 
 **Response:**
 ```json
 {
-  "online": ["alice", "bob"]
+  "online": [
+    {
+      "username": "alice",
+      "ip": "192.168.1.100",
+      "port": 9000
+    },
+    {
+      "username": "bob",
+      "ip": "192.168.1.101",
+      "port": 9001
+    }
+  ]
 }
 ```
 
@@ -172,7 +187,7 @@ Health check endpoint.
 
 ## Configuration
 
-- **HEARTBEAT_TTL_SECONDS**: Environment variable to set heartbeat TTL (default: 3 seconds)
+- **HEARTBEAT_TTL_SECONDS**: Environment variable to set heartbeat TTL (default: 10 seconds)
 
 ## Manual Testing (4 Terminals)
 
@@ -188,19 +203,19 @@ cd server && cargo run --release
 **Terminal 2 - Client 1 (Alice):**
 ```bash
 ./client/target/release/p2p-client register --username alice --password test123 --server http://localhost:8000
-./client/target/release/p2p-client start-heartbeat --username alice --server http://localhost:8000 --interval 5
+./client/target/release/p2p-client start-heartbeat --username alice --server http://localhost:8000 --interval 5 --ip 127.0.0.1 --port 9000
 ```
 
 **Terminal 3 - Client 2 (Bob):**
 ```bash
 ./client/target/release/p2p-client register --username bob --password test123 --server http://localhost:8000
-./client/target/release/p2p-client start-heartbeat --username bob --server http://localhost:8000 --interval 5
+./client/target/release/p2p-client start-heartbeat --username bob --server http://localhost:8000 --interval 5 --ip 127.0.0.1 --port 9001
 ```
 
 **Terminal 4 - Client 3 (Charlie) + Discovery:**
 ```bash
 ./client/target/release/p2p-client register --username charlie --password test123 --server http://localhost:8000
-./client/target/release/p2p-client start-heartbeat --username charlie --server http://localhost:8000 --interval 5
+./client/target/release/p2p-client start-heartbeat --username charlie --server http://localhost:8000 --interval 5 --ip 127.0.0.1 --port 9002
 
 # In the same terminal or a 5th terminal, query discovery:
 while true; do

@@ -21,6 +21,8 @@ struct RegisterResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct HeartbeatRequest {
     username: String,
+    ip: String,
+    port: u16,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,8 +32,15 @@ struct HeartbeatResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct UserInfo {
+    username: String,
+    ip: String,
+    port: u16,
+}
+
+#[derive(Debug, Serialize)]
 struct DiscoveryResponse {
-    online: Vec<String>,
+    online: Vec<UserInfo>,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,7 +72,14 @@ struct User {
     password: String,
 }
 
-type LastSeenMap = Arc<Mutex<HashMap<String, DateTime<Utc>>>>;
+#[derive(Debug, Clone)]
+struct UserPresence {
+    last_seen: DateTime<Utc>,
+    ip: String,
+    port: u16,
+}
+
+type LastSeenMap = Arc<Mutex<HashMap<String, UserPresence>>>;
 
 struct AppState {
     last_seen: LastSeenMap,
@@ -131,13 +147,19 @@ async fn heartbeat(
 ) -> ActixResult<HttpResponse> {
     let now = Utc::now();
     let username = req.username.clone();
+    let ip = req.ip.clone();
+    let port = req.port;
     
     {
         let mut last_seen = state.last_seen.lock().unwrap();
-        last_seen.insert(username.clone(), now);
+        last_seen.insert(username.clone(), UserPresence {
+            last_seen: now,
+            ip: ip.clone(),
+            port,
+        });
     }
     
-    log::info!("Heartbeat from: {} at {}", username, now.to_rfc3339());
+    log::info!("Heartbeat from: {} at {} ({}:{})", username, now.to_rfc3339(), ip, port);
     
     Ok(HttpResponse::Ok().json(HeartbeatResponse {
         status: "ok".to_string(),
@@ -150,21 +172,29 @@ async fn discovery_online(state: web::Data<AppState>) -> ActixResult<HttpRespons
     let ttl_seconds = state.ttl_seconds as i64;
     
     let last_seen = state.last_seen.lock().unwrap();
-    let online: Vec<String> = last_seen
+    let online: Vec<UserInfo> = last_seen
         .iter()
-        .filter_map(|(username, last_seen_time)| {
-            let elapsed = now.signed_duration_since(*last_seen_time);
+        .filter_map(|(username, presence)| {
+            let elapsed = now.signed_duration_since(presence.last_seen);
             let elapsed_seconds = elapsed.num_seconds();
             
             // Handle negative durations (shouldn't happen, but protect against clock skew)
             if elapsed_seconds < 0 {
                 log::warn!("Negative elapsed time for {}: {} seconds (clock skew?)", username, elapsed_seconds);
-                return Some(username.clone()); // Consider online if time is in future
+                return Some(UserInfo {
+                    username: username.clone(),
+                    ip: presence.ip.clone(),
+                    port: presence.port,
+                }); // Consider online if time is in future
             }
             
             if elapsed_seconds <= ttl_seconds {
                 log::debug!("User {} is online (elapsed: {}s, TTL: {}s)", username, elapsed_seconds, ttl_seconds);
-                Some(username.clone())
+                Some(UserInfo {
+                    username: username.clone(),
+                    ip: presence.ip.clone(),
+                    port: presence.port,
+                })
             } else {
                 log::debug!("User {} is offline (elapsed: {}s, TTL: {}s)", username, elapsed_seconds, ttl_seconds);
                 None
@@ -189,14 +219,14 @@ async fn debug_info(state: web::Data<AppState>) -> ActixResult<HttpResponse> {
     let last_seen = state.last_seen.lock().unwrap();
     let users: Vec<UserDebugInfo> = last_seen
         .iter()
-        .map(|(username, last_seen_time)| {
-            let elapsed = now.signed_duration_since(*last_seen_time);
+        .map(|(username, presence)| {
+            let elapsed = now.signed_duration_since(presence.last_seen);
             let elapsed_seconds = elapsed.num_seconds();
             let is_online = elapsed_seconds >= 0 && elapsed_seconds <= ttl_seconds;
             
             UserDebugInfo {
-                username: username.clone(),
-                last_seen: Some(last_seen_time.to_rfc3339()),
+                username: format!("{} ({}:{})", username, presence.ip, presence.port),
+                last_seen: Some(presence.last_seen.to_rfc3339()),
                 elapsed_seconds: Some(elapsed_seconds),
                 is_online,
             }
@@ -213,7 +243,7 @@ async fn main() -> std::io::Result<()> {
     let ttl_seconds = std::env::var("HEARTBEAT_TTL_SECONDS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(3);
+        .unwrap_or(10);
     
     let users_file = "data/users.json".to_string();
     
@@ -260,7 +290,7 @@ mod tests {
         web::Data::new(AppState {
             last_seen: Arc::new(Mutex::new(HashMap::new())),
             users_file,
-            ttl_seconds: 5,
+            ttl_seconds: 10,
         })
     }
     
@@ -340,6 +370,8 @@ mod tests {
             .uri("/heartbeat")
             .set_json(&HeartbeatRequest {
                 username: username.clone(),
+                ip: "127.0.0.1".to_string(),
+                port: 9000,
             })
             .to_request();
         
@@ -366,6 +398,8 @@ mod tests {
             .uri("/heartbeat")
             .set_json(&HeartbeatRequest {
                 username: "user1".to_string(),
+                ip: "127.0.0.1".to_string(),
+                port: 9001,
             })
             .to_request();
         test::call_service(&app, req1).await;
@@ -373,7 +407,11 @@ mod tests {
         // Manually set user2 to expired time
         {
             let mut last_seen = state.last_seen.lock().unwrap();
-            last_seen.insert("user2".to_string(), Utc::now() - chrono::Duration::seconds(60));
+            last_seen.insert("user2".to_string(), UserPresence {
+                last_seen: Utc::now() - chrono::Duration::seconds(60),
+                ip: "127.0.0.1".to_string(),
+                port: 9002,
+            });
         }
         
         // Query discovery
@@ -385,8 +423,8 @@ mod tests {
         assert!(resp.status().is_success());
         
         let body: DiscoveryResponse = test::read_body_json(resp).await;
-        assert!(body.online.contains(&"user1".to_string()));
-        assert!(!body.online.contains(&"user2".to_string()));
+        assert!(body.online.iter().any(|u| u.username == "user1"));
+        assert!(!body.online.iter().any(|u| u.username == "user2"));
     }
 }
 

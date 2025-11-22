@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# Quick test script - prints commands for 4 terminals
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLIENT_BIN="$PROJECT_ROOT/client/target/release/p2p-client"
+SERVER_DIR="$PROJECT_ROOT/server"
+
+echo "=========================================="
+echo "P2P Discovery - Quick Test Commands"
+echo "=========================================="
+echo ""
+echo "TERMINAL 1 - Server:"
+echo "  cd $SERVER_DIR"
+echo "  cargo run --release"
+echo ""
+echo "TERMINAL 2 - Alice (IP: 127.0.0.1:9000):"
+echo "  cd $PROJECT_ROOT"
+echo "  $CLIENT_BIN register --username alice --password test123 --server http://localhost:8000"
+echo "  $CLIENT_BIN start-heartbeat --username alice --server http://localhost:8000 --interval 5 --ip 127.0.0.1 --port 9000"
+echo ""
+echo "TERMINAL 3 - Bob (IP: 127.0.0.1:9001):"
+echo "  cd $PROJECT_ROOT"
+echo "  $CLIENT_BIN register --username bob --password test123 --server http://localhost:8000"
+echo "  $CLIENT_BIN start-heartbeat --username bob --server http://localhost:8000 --interval 5 --ip 127.0.0.1 --port 9001"
+echo ""
+echo "TERMINAL 4 - Charlie (IP: 127.0.0.1:9002) + Discovery:"
+echo "  cd $PROJECT_ROOT"
+echo "  $CLIENT_BIN register --username charlie --password test123 --server http://localhost:8000"
+echo "  $CLIENT_BIN start-heartbeat --username charlie --server http://localhost:8000 --interval 5 --ip 127.0.0.1 --port 9002"
+echo ""
+echo "Then in Terminal 4 (or a 5th terminal), query discovery:"
+echo "  $CLIENT_BIN list-online --server http://localhost:8000"
+echo ""
+echo "You should see all users with their IP:port addresses!"
+echo ""
+

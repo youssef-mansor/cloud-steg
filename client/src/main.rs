@@ -33,6 +33,10 @@ enum Commands {
         server: String,
         #[arg(long, default_value = "5")]
         interval: u64,
+        #[arg(long)]
+        ip: String,
+        #[arg(long)]
+        port: u16,
     },
     /// List all online users
     ListOnline {
@@ -55,6 +59,8 @@ struct RegisterResponse {
 #[derive(Debug, Serialize)]
 struct HeartbeatRequest {
     username: String,
+    ip: String,
+    port: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,8 +70,15 @@ struct HeartbeatResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct UserInfo {
+    username: String,
+    ip: String,
+    port: u16,
+}
+
+#[derive(Debug, Deserialize)]
 struct DiscoveryResponse {
-    online: Vec<String>,
+    online: Vec<UserInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -123,12 +136,14 @@ async fn register(username: String, password: String, server: String) -> anyhow:
     }
 }
 
-async fn send_heartbeat(username: &str, server: &str) -> anyhow::Result<()> {
+async fn send_heartbeat(username: &str, server: &str, ip: &str, port: u16) -> anyhow::Result<()> {
     let client = Client::new();
     let url = format!("{}/heartbeat", server);
     
     let req = HeartbeatRequest {
         username: username.to_string(),
+        ip: ip.to_string(),
+        port,
     };
     
     match client
@@ -156,14 +171,14 @@ async fn send_heartbeat(username: &str, server: &str) -> anyhow::Result<()> {
     }
 }
 
-async fn start_heartbeat(username: String, server: String, interval: u64) -> anyhow::Result<()> {
-    println!("Starting heartbeat for '{}' to {} (interval: {}s)", username, server, interval);
+async fn start_heartbeat(username: String, server: String, interval: u64, ip: String, port: u16) -> anyhow::Result<()> {
+    println!("Starting heartbeat for '{}' to {} (interval: {}s, {}:{})", username, server, interval, ip, port);
     println!("Press CTRL+C to stop");
     
     let interval_duration = Duration::from_secs(interval);
     
     loop {
-        if let Err(e) = send_heartbeat(&username, &server).await {
+        if let Err(e) = send_heartbeat(&username, &server, &ip, port).await {
             eprintln!("Warning: {}", e);
         }
         sleep(interval_duration).await;
@@ -185,8 +200,8 @@ async fn list_online(server: String) -> anyhow::Result<()> {
             println!("No users online");
         } else {
             println!("Online users ({}):", body.online.len());
-            for username in body.online {
-                println!("  - {}", username);
+            for user in body.online {
+                println!("  - {} @ {}:{}", user.username, user.ip, user.port);
             }
         }
         Ok(())
@@ -212,7 +227,9 @@ async fn main() -> anyhow::Result<()> {
             username,
             server,
             interval,
-        } => start_heartbeat(username, server, interval).await,
+            ip,
+            port,
+        } => start_heartbeat(username, server, interval, ip, port).await,
         Commands::ListOnline { server } => list_online(server).await,
     }
 }
