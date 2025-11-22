@@ -1,0 +1,10 @@
+/Users/kareemabdelrazek/projects/client-side/server/target/release/deps/actix_codec-4af3461ae1d33305.d: /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lib.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/bcodec.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/framed.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lines.rs
+
+/Users/kareemabdelrazek/projects/client-side/server/target/release/deps/libactix_codec-4af3461ae1d33305.rlib: /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lib.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/bcodec.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/framed.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lines.rs
+
+/Users/kareemabdelrazek/projects/client-side/server/target/release/deps/libactix_codec-4af3461ae1d33305.rmeta: /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lib.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/bcodec.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/framed.rs /Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lines.rs
+
+/Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lib.rs:
+/Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/bcodec.rs:
+/Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/framed.rs:
+/Users/kareemabdelrazek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/actix-codec-0.5.2/src/lines.rs:
