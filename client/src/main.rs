@@ -5,6 +5,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
+use image::{ImageFormat, DynamicImage};
+use base64::{Engine as _, engine::general_purpose};
 
 #[derive(Parser)]
 #[command(name = "p2p-client")]
@@ -22,6 +24,8 @@ enum Commands {
         username: String,
         #[arg(long)]
         password: String,
+        #[arg(long, value_delimiter = ',')]
+        image_paths: Vec<String>,
         #[arg(long, default_value = "http://localhost:8000")]
         server: String,
     },
@@ -49,6 +53,7 @@ enum Commands {
 struct RegisterRequest {
     username: String,
     password: String,
+    sample_images: Vec<String>, // array of base64 encoded 128x128 images
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +79,7 @@ struct UserInfo {
     username: String,
     ip: String,
     port: u16,
+    sample_images: Option<Vec<String>>, // array of base64 encoded 128x128 images
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +91,25 @@ struct DiscoveryResponse {
 struct ClientConfig {
     username: String,
     server: String,
+}
+
+fn process_image(image_path: &str) -> anyhow::Result<String> {
+    // Load the image
+    let img = image::open(image_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open image: {}", e))?;
+    
+    // Resize to 128x128
+    let resized = img.resize_exact(128, 128, image::imageops::FilterType::Lanczos3);
+    
+    // Convert to PNG bytes
+    let mut buffer = Vec::new();
+    resized.write_to(&mut std::io::Cursor::new(&mut buffer), ImageFormat::Png)
+        .map_err(|e| anyhow::anyhow!("Failed to encode image: {}", e))?;
+    
+    // Encode to base64
+    let base64_image = general_purpose::STANDARD.encode(&buffer);
+    
+    Ok(base64_image)
 }
 
 fn save_client_config(username: &str, server: &str) -> anyhow::Result<()> {
@@ -104,13 +129,26 @@ fn save_client_config(username: &str, server: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn register(username: String, password: String, server: String) -> anyhow::Result<()> {
+async fn register(username: String, password: String, image_paths: Vec<String>, server: String) -> anyhow::Result<()> {
     let client = Client::new();
     let url = format!("{}/register", server);
+    
+    println!("Processing {} image(s)...", image_paths.len());
+    let mut sample_images = Vec::new();
+    
+    for (i, image_path) in image_paths.iter().enumerate() {
+        println!("  [{}] Processing: {}", i + 1, image_path);
+        let sample_image = process_image(image_path)?;
+        println!("  [{}] Success (base64 length: {})", i + 1, sample_image.len());
+        sample_images.push(sample_image);
+    }
+    
+    println!("All {} image(s) processed successfully!", sample_images.len());
     
     let req = RegisterRequest {
         username: username.clone(),
         password,
+        sample_images,
     };
     
     let resp = client
@@ -201,7 +239,17 @@ async fn list_online(server: String) -> anyhow::Result<()> {
         } else {
             println!("Online users ({}):", body.online.len());
             for user in body.online {
-                println!("  - {} @ {}:{}", user.username, user.ip, user.port);
+                if let Some(imgs) = &user.sample_images {
+                    if imgs.is_empty() {
+                        println!("  - {} @ {}:{} [no images]", user.username, user.ip, user.port);
+                    } else {
+                        let preview = &imgs[0].chars().take(20).collect::<String>();
+                        println!("  - {} @ {}:{} [{} image(s), first: {}...]", 
+                            user.username, user.ip, user.port, imgs.len(), preview);
+                    }
+                } else {
+                    println!("  - {} @ {}:{} [no images]", user.username, user.ip, user.port);
+                }
             }
         }
         Ok(())
@@ -221,8 +269,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Register {
             username,
             password,
+            image_paths,
             server,
-        } => register(username, password, server).await,
+        } => register(username, password, image_paths, server).await,
         Commands::StartHeartbeat {
             username,
             server,
