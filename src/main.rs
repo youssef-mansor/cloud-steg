@@ -394,6 +394,7 @@ async fn run_election(
             (Utc::now() + ChronoDuration::milliseconds(cfg.leader_term_ms as i64)).timestamp() as u64;
 
         if leader_addr == this_addr_str {
+            // I won - become leader and broadcast to peers
             {
                 let mut ns = shared.write().await;
                 ns.state = State::Leader;
@@ -403,13 +404,19 @@ async fn run_election(
             }
             broadcast_leader(&peers, &this_addr_str, term_end_unix, election_term, cfg.net_timeout_ms).await;
         } else {
+            // Someone else won - update my state AND notify them + all peers
             let mut ns = shared.write().await;
             ns.state = State::Follower;
             ns.leader = Some(leader_addr.clone());
             ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_ms));
             ns.last_heartbeat = Some(Instant::now());
+            drop(ns); // Release lock before network operations
+            
+            // Broadcast the winner to ALL peers (including the winner itself)
+            broadcast_leader(&peers, &leader_addr, term_end_unix, election_term, cfg.net_timeout_ms).await;
         }
     }
+
 
     Ok(())
 }
