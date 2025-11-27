@@ -298,16 +298,35 @@ async fn handle_connection(
         Message::LeaderAnnounce { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
             
-            // Only accept announcements from current or higher term
             if term >= ns.current_term {
                 if term > ns.current_term {
                     ns.current_term = term;
                     if ns.state == State::Leader {
-                        println!("Stepping down: received leader announce from higher term {}", term);
+                        println!(
+                            "[LEADER_ANNOUNCE] Stepping down: received leader announce for term {} while leader in term {}",
+                            term, ns.current_term
+                        );
                         ns.state = State::Follower;
                     }
                 }
-                
+
+                let is_self = match std::env::var("THIS_NODE_ADDR") {
+                    Ok(this_addr) => this_addr == leader,
+                    Err(_) => false,
+                };
+
+                if is_self {
+                    println!(
+                        "[LEADER_ANNOUNCE] I ({}) am elected leader for term {}",
+                        leader, term
+                    );
+                } else {
+                    println!(
+                        "[LEADER_ANNOUNCE] New leader {} for term {} (I become follower)",
+                        leader, term
+                    );
+                }
+
                 ns.leader = Some(leader);
                 let now_unix = Utc::now().timestamp() as u64;
                 if term_end_unix > now_unix {
@@ -319,13 +338,17 @@ async fn handle_connection(
                 ns.state = State::Follower;
                 ns.last_heartbeat = Some(Instant::now());
             } else {
-                println!("Rejected leader announce from term {} (current term: {})", term, ns.current_term);
+                println!(
+                    "[LEADER_ANNOUNCE] Rejected leader announce from term {} (current term: {})",
+                    term, ns.current_term
+                );
             }
-            
+
             let resp = Message::Ping;
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
         }
+
         Message::CpuResp { .. } => {}
         Message::Ping => {
             let resp = Message::Ping;
@@ -394,7 +417,6 @@ async fn run_election(
             (Utc::now() + ChronoDuration::milliseconds(cfg.leader_term_ms as i64)).timestamp() as u64;
 
         if leader_addr == this_addr_str {
-            // I won - become leader and broadcast to peers
             {
                 let mut ns = shared.write().await;
                 ns.state = State::Leader;
@@ -402,19 +424,26 @@ async fn run_election(
                 ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_ms));
                 ns.last_heartbeat = Some(Instant::now());
             }
+            println!(
+                "[ELECTION] I ({}) won term {}. Broadcasting LeaderAnnounce to peers",
+                this_addr_str, election_term
+            );
             broadcast_leader(&peers, &this_addr_str, term_end_unix, election_term, cfg.net_timeout_ms).await;
         } else {
-            // Someone else won - update my state AND notify them + all peers
-            let mut ns = shared.write().await;
-            ns.state = State::Follower;
-            ns.leader = Some(leader_addr.clone());
-            ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_ms));
-            ns.last_heartbeat = Some(Instant::now());
-            drop(ns); // Release lock before network operations
-            
-            // Broadcast the winner to ALL peers (including the winner itself)
+            {
+                let mut ns = shared.write().await;
+                ns.state = State::Follower;
+                ns.leader = Some(leader_addr.clone());
+                ns.term_end = Some(Instant::now() + StdDuration::from_millis(cfg.leader_term_ms));
+                ns.last_heartbeat = Some(Instant::now());
+            }
+            println!(
+                "[ELECTION] {} won term {} (I am {}). Broadcasting LeaderAnnounce",
+                leader_addr, election_term, this_addr_str
+            );
             broadcast_leader(&peers, &leader_addr, term_end_unix, election_term, cfg.net_timeout_ms).await;
         }
+
     }
 
 
@@ -475,11 +504,16 @@ async fn broadcast_leader(peers: &[SocketAddr], leader: &str, term_end_unix: u64
         if p_s == leader {
             continue;
         }
+        println!(
+            "[BROADCAST] Announcing leader {} for term {} to {}",
+            leader, term, p_s
+        );
         let leader_s = leader.to_string();
         let msg = Message::LeaderAnnounce { leader: leader_s.clone(), term_end_unix, term };
         let _ = send_message(p, &msg, timeout_ms).await;
     }
 }
+
 
 
 async fn send_heartbeat_to_peers(
