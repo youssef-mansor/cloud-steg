@@ -65,6 +65,7 @@ struct NodeState {
     term_end: Option<Instant>,
     startup_time: Instant,
     current_term: u64,
+    cpu_snapshot: f32,
 }
 
 
@@ -96,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
         term_end: None,
         startup_time: Instant::now(),
         current_term: 0,
+        cpu_snapshot: 0.0,
     }));
 
     let cpu = Arc::new(RwLock::new(0f32));
@@ -261,13 +263,23 @@ async fn handle_connection(
             w.write_all(s.as_bytes()).await?;
         }
         Message::GetCpu { term, initiator_addr, initiator_cpu } => {
-            // Just bind the variables - they're already the right types
-            let val = { *cpu.read().await };
-            let resp = Message::CpuResp { cpu_percent: val, addr: peer.to_string(), term };
+            let snapshot_val = {
+                let mut ns = shared.write().await;
+                
+                // If this is a new term, update our snapshot
+                if term > ns.current_term {
+                    ns.current_term = term;
+                    ns.cpu_snapshot = *cpu.read().await;  // Take snapshot for this term
+                }
+                
+                ns.cpu_snapshot  // Return the snapshot for this term
+            };
+            
+            let resp = Message::CpuResp { cpu_percent: snapshot_val, addr: peer.to_string(), term };
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
-            // You can optionally log: println!("Received GetCpu from initiator {} with CPU {}%", initiator_addr, initiator_cpu);
         }
+
         Message::LeaderAnnounce { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
             
@@ -319,15 +331,17 @@ async fn run_election(
     cpu: Arc<RwLock<f32>>,
 ) -> anyhow::Result<()> {
     // Increment term at start of election
-    let election_term = {
+        // Increment term and snapshot CPU atomically
+    let (election_term, self_cpu_snapshot) = {
         let mut ns = shared.write().await;
         ns.current_term += 1;
-        ns.current_term
+        ns.cpu_snapshot = *cpu.read().await;  // Snapshot for this term
+        (ns.current_term, ns.cpu_snapshot)
     };
     
+    println!("Starting election from {} for term {} with CPU snapshot: {}%", 
+             this_addr_str, election_term, self_cpu_snapshot);
     
-    let self_cpu_snapshot = *cpu.read().await;
-    println!("Starting election from {} for term {}", this_addr_str, election_term);
     let mut collected: HashMap<String, f32> = HashMap::new();
     collected.insert(this_addr_str.to_string(), self_cpu_snapshot);
 
