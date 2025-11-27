@@ -43,7 +43,7 @@ struct Config {
 #[serde(tag = "type")]
 enum Message {
     Heartbeat { leader: String, term_end_unix: u64, term: u64 },
-    GetCpu { term: u64 },
+    GetCpu { term: u64, initiator_addr: String, initiator_cpu: f32 },
     CpuResp { cpu_percent: f32, addr: String, term: u64 },
     LeaderAnnounce { leader: String, term_end_unix: u64, term: u64 },
     Ping,
@@ -260,11 +260,13 @@ async fn handle_connection(
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
         }
-        Message::GetCpu { term } => {
+        Message::GetCpu { term, initiator_addr, initiator_cpu } => {
+            // Just bind the variables - they're already the right types
             let val = { *cpu.read().await };
             let resp = Message::CpuResp { cpu_percent: val, addr: peer.to_string(), term };
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
+            // You can optionally log: println!("Received GetCpu from initiator {} with CPU {}%", initiator_addr, initiator_cpu);
         }
         Message::LeaderAnnounce { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
@@ -308,6 +310,7 @@ async fn handle_connection(
 }
 
 
+
 async fn run_election(
     peers: &[SocketAddr],
     this_addr_str: &str,
@@ -322,23 +325,20 @@ async fn run_election(
         ns.current_term
     };
     
+    
+    let self_cpu_snapshot = *cpu.read().await;
     println!("Starting election from {} for term {}", this_addr_str, election_term);
-    // Snapshot self CPU ONCE for this election
-    let self_cpu_snapshot = {
-        *cpu.read().await
-    };
     let mut collected: HashMap<String, f32> = HashMap::new();
     collected.insert(this_addr_str.to_string(), self_cpu_snapshot);
-
 
     for p in peers.iter() {
         let p_s = p.to_string();
         if p_s == this_addr_str {
             continue;
         }
-        match request_cpu(p, cfg.net_timeout_ms, election_term).await {
+        match request_cpu(p, cfg.net_timeout_ms, election_term, this_addr_str, self_cpu_snapshot).await {
             Ok(val) => {
-                collected.insert(p_s.clone(), val);
+                collected.insert(p.to_string(), val);
             }
             Err(e) => {
                 eprintln!("failed to get cpu from {}: {}", p, e);
@@ -386,7 +386,7 @@ async fn run_election(
 }
 
 
-async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64) -> anyhow::Result<f32> {
+async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64, initiator_addr: &str, initiator_cpu: f32) -> anyhow::Result<f32> {
     let addr = peer.to_string();
     println!("[CPU Request] Connecting to {}", addr);
     let connect =
@@ -402,7 +402,11 @@ async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64) -> anyhow::R
         }
     };
 
-    let msg = Message::GetCpu { term };
+    let msg = Message::GetCpu {  
+        term, 
+        initiator_addr: initiator_addr.to_string(),
+        initiator_cpu 
+    };
     let s = serde_json::to_string(&msg)? + "\n";
     stream.write_all(s.as_bytes()).await?;
     println!("[CPU Request] Sent GetCpu to {}", addr);
