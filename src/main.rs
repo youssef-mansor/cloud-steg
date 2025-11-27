@@ -126,14 +126,16 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(this_addr).await?;
     let listener_shared = shared.clone();
     let cpu_for_handler = cpu.clone();
+    let this_node_str = cfg.this_node.clone();
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     let s = listener_shared.clone();
                     let c = cpu_for_handler.clone();
+                    let this_node = this_node_str.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(stream, s, c).await {
+                        if let Err(e) = handle_connection(stream, s, c, this_node).await {
                             eprintln!("handler error from {}: {}", addr, e);
                         }
                     });
@@ -144,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
 
     let shared_clone = shared.clone();
     let peers_clone = peers.clone();
@@ -235,6 +238,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     shared: Arc<RwLock<NodeState>>,
     cpu: Arc<RwLock<f32>>,
+    this_node: String,
 ) -> anyhow::Result<()> {
     let peer = stream.peer_addr()?;
     let (r, mut w) = stream.split();
@@ -297,37 +301,38 @@ async fn handle_connection(
 
         Message::LeaderAnnounce { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
-            
+
+            // Only accept announcements from current or higher term
             if term >= ns.current_term {
                 if term > ns.current_term {
                     ns.current_term = term;
                     if ns.state == State::Leader {
                         println!(
-                            "[LEADER_ANNOUNCE] Stepping down: received leader announce for term {} while leader in term {}",
-                            term, ns.current_term
+                            "[LEADER_ANNOUNCE] Stepping down: received leader announce from higher term {}",
+                            term
                         );
                         ns.state = State::Follower;
                     }
                 }
 
-                let is_self = match std::env::var("THIS_NODE_ADDR") {
-                    Ok(this_addr) => this_addr == leader,
-                    Err(_) => false,
-                };
+                let is_self = leader == this_node;
 
                 if is_self {
                     println!(
                         "[LEADER_ANNOUNCE] I ({}) am elected leader for term {}",
                         leader, term
                     );
+                    ns.state = State::Leader;
+                    ns.leader = Some(this_node.clone());
                 } else {
                     println!(
                         "[LEADER_ANNOUNCE] New leader {} for term {} (I become follower)",
                         leader, term
                     );
+                    ns.state = State::Follower;
+                    ns.leader = Some(leader.clone());
                 }
 
-                ns.leader = Some(leader);
                 let now_unix = Utc::now().timestamp() as u64;
                 if term_end_unix > now_unix {
                     let remaining = term_end_unix - now_unix;
@@ -335,7 +340,6 @@ async fn handle_connection(
                 } else {
                     ns.term_end = None;
                 }
-                ns.state = State::Follower;
                 ns.last_heartbeat = Some(Instant::now());
             } else {
                 println!(
@@ -348,6 +352,7 @@ async fn handle_connection(
             let s = serde_json::to_string(&resp)? + "\n";
             w.write_all(s.as_bytes()).await?;
         }
+
 
         Message::CpuResp { .. } => {}
         Message::Ping => {
@@ -498,21 +503,30 @@ async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64, initiator_ad
 }
 
 
-async fn broadcast_leader(peers: &[SocketAddr], leader: &str, term_end_unix: u64, term: u64, timeout_ms: u64) {
+async fn broadcast_leader(
+    peers: &[SocketAddr],
+    leader: &str,
+    term_end_unix: u64,
+    term: u64,
+    timeout_ms: u64,
+) {
     for p in peers.iter() {
         let p_s = p.to_string();
-        if p_s == leader {
-            continue;
-        }
+        // Do NOT skip the leader; it must also receive the announcement
         println!(
             "[BROADCAST] Announcing leader {} for term {} to {}",
             leader, term, p_s
         );
         let leader_s = leader.to_string();
-        let msg = Message::LeaderAnnounce { leader: leader_s.clone(), term_end_unix, term };
+        let msg = Message::LeaderAnnounce {
+            leader: leader_s.clone(),
+            term_end_unix,
+            term,
+        };
         let _ = send_message(p, &msg, timeout_ms).await;
     }
 }
+
 
 
 
