@@ -323,8 +323,13 @@ async fn run_election(
     };
     
     println!("Starting election from {} for term {}", this_addr_str, election_term);
+    // Snapshot self CPU ONCE for this election
+    let self_cpu_snapshot = {
+        *cpu.read().await
+    };
     let mut collected: HashMap<String, f32> = HashMap::new();
-    collected.insert(this_addr_str.to_string(), *cpu.read().await);
+    collected.insert(this_addr_str.to_string(), self_cpu_snapshot);
+
 
     for p in peers.iter() {
         let p_s = p.to_string();
