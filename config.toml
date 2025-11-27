@@ -20,7 +20,11 @@ peers = [
 heartbeat_interval_ms = 300
 
 # If a follower misses this many milliseconds since last heartbeat, it starts election
-heartbeat_timeout_ms = 3000
+# Randomized election timeout range (milliseconds)
+# Each node will pick a random value between min and max
+# Raft recommends: max should be ~2x min, and min should be 10x heartbeat_interval
+election_timeout_min_ms = 9000
+election_timeout_max_ms = 15000
 
 # Duration of a leader term in milliseconds (default 2 minutes = 120,000)
 leader_term_ms = 30000

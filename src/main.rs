@@ -14,6 +14,11 @@ use tokio::time::sleep;
 use chrono::Utc;
 use std::time::Duration as StdDuration;
 use chrono::Duration as ChronoDuration;
+use rand::Rng;
+
+fn random_election_timeout(cfg: &Config) -> u64 {
+    rand::thread_rng().gen_range(cfg.election_timeout_min_ms..=cfg.election_timeout_max_ms)
+}
 
 
 #[derive(Parser, Debug)]
@@ -31,7 +36,8 @@ struct Config {
     this_node: String,
     peers: Vec<String>,
     heartbeat_interval_ms: u64,
-    heartbeat_timeout_ms: u64,
+    election_timeout_min_ms: u64,
+    election_timeout_max_ms: u64,
     leader_term_ms: u64,
     net_timeout_ms: u64,
     cpu_refresh_ms: u64,
@@ -144,21 +150,23 @@ async fn main() -> anyhow::Result<()> {
     let cfg_clone = cfg.clone();
     let this_addr_str = cfg.this_node.clone();
     tokio::spawn(async move {
+        let mut election_timeout = random_election_timeout(&cfg_clone);  // Generate initial random timeout
+        
         loop {
             {
                 let ns = shared_clone.read().await;
                 if ns.state == State::Follower {
                     let should_elect = if let Some(last) = ns.last_heartbeat {
-                        // print for debug
-                        println!("Last heartbeat received, elapsed: {} ms, current term: {}", last.elapsed().as_millis(), ns.current_term);
-                        last.elapsed().as_millis() as u64 >= cfg_clone.heartbeat_timeout_ms
+                        println!("Last heartbeat received, elapsed: {} ms, current term: {}, timeout: {} ms", 
+                                last.elapsed().as_millis(), ns.current_term, election_timeout);
+                        last.elapsed().as_millis() as u64 >= election_timeout
                     } else {
-                        // print for debug
-                        println!("No heartbeat received yet, elapsed: {} ms, current term: {}", ns.startup_time.elapsed().as_millis(), ns.current_term);
+                        println!("No heartbeat received yet, elapsed: {} ms, current term: {}, timeout: {} ms", 
+                                ns.startup_time.elapsed().as_millis(), ns.current_term, election_timeout);
                         // Wait 2x timeout before first election attempt
-                        ns.startup_time.elapsed().as_millis() as u64 >= (cfg_clone.heartbeat_timeout_ms * 2)
-
+                        ns.startup_time.elapsed().as_millis() as u64 >= (election_timeout)
                     };
+                    
                     if should_elect {
                         drop(ns);
                         if let Err(e) =
@@ -166,12 +174,19 @@ async fn main() -> anyhow::Result<()> {
                         {
                             eprintln!("election failed: {}", e);
                         }
+                        // Generate NEW random timeout after election attempt
+                        election_timeout = random_election_timeout(&cfg_clone);
+                        println!("New random election timeout: {} ms", election_timeout);
                     }
+                } else if ns.state == State::Leader {
+                    // Reset timeout when we're leader
+                    election_timeout = random_election_timeout(&cfg_clone);
                 }
             }
             sleep(StdDuration::from_millis(500)).await;
         }
     });
+
 
     let shared_clone2 = shared.clone();
     let peers_clone2 = peers.clone();
