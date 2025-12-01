@@ -1,3 +1,11 @@
+//! Main entry point - Leader Election + User Registration
+
+mod registration;
+mod api;
+
+use api::{AppState, create_router};
+use registration::{RegistrationConfig, UserDirectory};
+
 use anyhow::Context;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -15,11 +23,11 @@ use chrono::Utc;
 use std::time::Duration as StdDuration;
 use chrono::Duration as ChronoDuration;
 use rand::Rng;
+use tracing::info;
 
 fn random_election_timeout(cfg: &Config) -> u64 {
     rand::thread_rng().gen_range(cfg.election_timeout_min_ms..=cfg.election_timeout_max_ms)
 }
-
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -29,7 +37,6 @@ struct Args {
     #[clap(long)]
     this_node: Option<String>,
 }
-
 
 #[derive(Deserialize, Debug, Clone)]
 struct Config {
@@ -44,7 +51,6 @@ struct Config {
     election_retry_ms: u64,
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 enum Message {
@@ -55,13 +61,11 @@ enum Message {
     Ping,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum State {
     Follower,
     Leader,
 }
-
 
 #[derive(Debug)]
 struct NodeState {
@@ -74,21 +78,101 @@ struct NodeState {
     cpu_snapshot: f32,
 }
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize logging
+    tracing_subscriber::fmt()
+        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
+        .init();
+
+    info!("===========================================");
+    info!("Distributed System: Leader Election + User Registration");
+    info!("===========================================\n");
+
+    // Parse command line arguments
     let args = Args::parse();
     let cfg_text = fs::read_to_string(&args.config).context("read config")?;
     let mut cfg: Config = toml::from_str(&cfg_text).context("parse config")?;
 
-    // override this_node if provided
+    // Override this_node if provided
     if let Some(node) = args.this_node {
         cfg.this_node = node;
     }
 
     let this_addr: SocketAddr = cfg.this_node.parse().context("parse this_node as SocketAddr")?;
 
-    println!("Starting node {}", this_addr);
+    info!("Node Configuration:");
+    info!("  Address: {}", this_addr);
+    info!("  Peers: {:?}", cfg.peers);
+    info!("");
+
+    // ========================================
+    // INITIALIZE USER REGISTRATION SYSTEM
+    // ========================================
+    info!("Initializing user registration system...");
+    
+    let shared_drive_id = std::env::var("SHARED_DRIVE_ID")
+        .unwrap_or_else(|_| "0AEwep46IAWKDUk9PVA".to_string());
+    
+    let credentials_path = std::env::var("GOOGLE_CREDENTIALS")
+        .unwrap_or_else(|_| "credentials/service-account.json".to_string());
+    
+    let reg_config = RegistrationConfig::new(&credentials_path, "registered-users")
+        .with_shared_drive(shared_drive_id.clone());
+
+    let user_directory = match UserDirectory::new(reg_config).await {
+        Ok(dir) => {
+            info!("✓ User registration system initialized");
+            Arc::new(dir)
+        }
+        Err(e) => {
+            eprintln!("⚠ Failed to initialize user registration: {}", e);
+            eprintln!("⚠ Continuing with leader election only...");
+            return Err(e.into());
+        }
+    };
+
+    // ========================================
+    // START HTTP API SERVER
+    // ========================================
+    let api_port = std::env::var("API_PORT")
+        .unwrap_or_else(|_| "3000".to_string())
+        .parse::<u16>()
+        .unwrap_or(3000);
+    
+    let api_addr = format!("0.0.0.0:{}", api_port);
+    let app_state = AppState {
+        user_directory: user_directory.clone(),
+    };
+    let app = create_router(app_state);
+    
+    let api_addr_clone = api_addr.clone();
+    tokio::spawn(async move {
+        match tokio::net::TcpListener::bind(&api_addr_clone).await {
+            Ok(listener) => {
+                info!("🚀 HTTP API server listening on http://{}", api_addr_clone);
+                info!("   Endpoints:");
+                info!("     GET  /           - Health check");
+                info!("     POST /register   - Register new user");
+                info!("     GET  /users      - List all users");
+                info!("");
+                if let Err(e) = axum::serve(listener, app).await {
+                    eprintln!("HTTP API server error: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to bind HTTP API server: {}", e);
+            }
+        }
+    });
+
+    // Give the HTTP server a moment to start
+    sleep(StdDuration::from_millis(100)).await;
+
+    // ========================================
+    // START LEADER ELECTION SYSTEM
+    // ========================================
+    info!("Starting leader election system...");
 
     let peers: Vec<SocketAddr> = cfg
         .peers
@@ -124,6 +208,9 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let listener = TcpListener::bind(this_addr).await?;
+    info!("✓ Leader election TCP listener bound to {}", this_addr);
+    info!("");
+
     let listener_shared = shared.clone();
     let cpu_for_handler = cpu.clone();
     let this_node_str = cfg.this_node.clone();
@@ -147,13 +234,12 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-
     let shared_clone = shared.clone();
     let peers_clone = peers.clone();
     let cfg_clone = cfg.clone();
     let this_addr_str = cfg.this_node.clone();
     tokio::spawn(async move {
-        let mut election_timeout = random_election_timeout(&cfg_clone);  // Generate initial random timeout
+        let mut election_timeout = random_election_timeout(&cfg_clone);
         
         loop {
             {
@@ -166,7 +252,6 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         println!("No heartbeat received yet, elapsed: {} ms, current term: {}, timeout: {} ms", 
                                 ns.startup_time.elapsed().as_millis(), ns.current_term, election_timeout);
-                        // Wait 2x timeout before first election attempt
                         ns.startup_time.elapsed().as_millis() as u64 >= (election_timeout)
                     };
                     
@@ -177,19 +262,16 @@ async fn main() -> anyhow::Result<()> {
                         {
                             eprintln!("election failed: {}", e);
                         }
-                        // Generate NEW random timeout after election attempt
                         election_timeout = random_election_timeout(&cfg_clone);
                         println!("New random election timeout: {} ms", election_timeout);
                     }
                 } else if ns.state == State::Leader {
-                    // Reset timeout when we're leader
                     election_timeout = random_election_timeout(&cfg_clone);
                 }
             }
             sleep(StdDuration::from_millis(500)).await;
         }
     });
-
 
     let shared_clone2 = shared.clone();
     let peers_clone2 = peers.clone();
@@ -228,11 +310,15 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    info!("✓ All systems operational!");
+    info!("");
+    info!("Use Ctrl+C to shutdown");
+    info!("===========================================\n");
+
     loop {
         sleep(StdDuration::from_secs(60)).await;
     }
 }
-
 
 async fn handle_connection(
     mut stream: TcpStream,
@@ -253,9 +339,7 @@ async fn handle_connection(
         Message::Heartbeat { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
             
-            // Only accept heartbeats from current or higher term
             if term >= ns.current_term {
-                // If higher term, update and step down if leader
                 if term > ns.current_term {
                     ns.current_term = term;
                     if ns.state == State::Leader {
@@ -285,13 +369,12 @@ async fn handle_connection(
             let snapshot_val = {
                 let mut ns = shared.write().await;
                 
-                // If this is a new term, update our snapshot
                 if term > ns.current_term {
                     ns.current_term = term;
-                    ns.cpu_snapshot = *cpu.read().await;  // Take snapshot for this term
+                    ns.cpu_snapshot = *cpu.read().await;
                 }
                 
-                ns.cpu_snapshot  // Return the snapshot for this term
+                ns.cpu_snapshot
             };
             
             let resp = Message::CpuResp { cpu_percent: snapshot_val, addr: peer.to_string(), term };
@@ -302,7 +385,6 @@ async fn handle_connection(
         Message::LeaderAnnounce { leader, term_end_unix, term } => {
             let mut ns = shared.write().await;
 
-            // Only accept announcements from current or higher term
             if term >= ns.current_term {
                 if term > ns.current_term {
                     ns.current_term = term;
@@ -353,7 +435,6 @@ async fn handle_connection(
             w.write_all(s.as_bytes()).await?;
         }
 
-
         Message::CpuResp { .. } => {}
         Message::Ping => {
             let resp = Message::Ping;
@@ -364,8 +445,6 @@ async fn handle_connection(
     Ok(())
 }
 
-
-
 async fn run_election(
     peers: &[SocketAddr],
     this_addr_str: &str,
@@ -373,12 +452,10 @@ async fn run_election(
     shared: Arc<RwLock<NodeState>>,
     cpu: Arc<RwLock<f32>>,
 ) -> anyhow::Result<()> {
-    // Increment term at start of election
-        // Increment term and snapshot CPU atomically
     let (election_term, self_cpu_snapshot) = {
         let mut ns = shared.write().await;
         ns.current_term += 1;
-        ns.cpu_snapshot = *cpu.read().await;  // Snapshot for this term
+        ns.cpu_snapshot = *cpu.read().await;
         (ns.current_term, ns.cpu_snapshot)
     };
     
@@ -448,13 +525,10 @@ async fn run_election(
             );
             broadcast_leader(&peers, &leader_addr, term_end_unix, election_term, cfg.net_timeout_ms).await;
         }
-
     }
-
 
     Ok(())
 }
-
 
 async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64, initiator_addr: &str, initiator_cpu: f32) -> anyhow::Result<f32> {
     let addr = peer.to_string();
@@ -502,7 +576,6 @@ async fn request_cpu(peer: &SocketAddr, timeout_ms: u64, term: u64, initiator_ad
     }
 }
 
-
 async fn broadcast_leader(
     peers: &[SocketAddr],
     leader: &str,
@@ -512,7 +585,6 @@ async fn broadcast_leader(
 ) {
     for p in peers.iter() {
         let p_s = p.to_string();
-        // Do NOT skip the leader; it must also receive the announcement
         println!(
             "[BROADCAST] Announcing leader {} for term {} to {}",
             leader, term, p_s
@@ -526,9 +598,6 @@ async fn broadcast_leader(
         let _ = send_message(p, &msg, timeout_ms).await;
     }
 }
-
-
-
 
 async fn send_heartbeat_to_peers(
     peers: &[SocketAddr],
@@ -551,7 +620,6 @@ async fn send_heartbeat_to_peers(
         let _ = send_message(p, &msg, cfg.net_timeout_ms).await;
     }
 }
-
 
 async fn send_message(peer: &SocketAddr, msg: &Message, timeout_ms: u64) -> anyhow::Result<()> {
     let addr = peer.to_string();
