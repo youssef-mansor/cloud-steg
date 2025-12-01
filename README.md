@@ -3,6 +3,11 @@
 **Run Command**
 cargo run -- --config config.toml --this-node <ip>:<port>
 
+peers = [
+ "10.40.54.163:5000",
+ "10.40.51.185:5000",
+ "10.40.44.249:5000",
+]
 
 
 **NEW**
@@ -10,7 +15,7 @@ cargo run -- --config config.toml --this-node <ip>:<port>
 SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3000 cargo run -- --config config.toml --this-node 10.40.54.163:8080
 
 # Terminal 2 - Node 2 (HTTP API on port 3001)
-SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3001 cargo run -- --config config.toml --this-node 127.0.0.1:8081
+SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3001 cargo run -- --config config.toml --this-node 10.40.51.185:8081
 
 # Terminal 3 - Node 3 (HTTP API on port 3002)
 SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3002 cargo run -- --config config.toml --this-node 127.0.0.1:8082

@@ -1,6 +1,7 @@
 //! HTTP API for user registration
 
 use crate::registration::{UserDirectory, UserInfo};
+use crate::NodeState;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -10,12 +11,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::info;
 
 // Shared application state
 #[derive(Clone)]
 pub struct AppState {
     pub user_directory: Arc<UserDirectory>,
+    pub node_state: Arc<RwLock<NodeState>>,  // ADD THIS
 }
 
 // Request/Response types
@@ -33,14 +36,17 @@ pub struct RegisterResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct UserListResponse {
     pub users: Vec<UserInfo>,
     pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StatusResponse {
+    pub status: String,
+    pub service: String,
+    pub is_leader: bool,
+    pub current_leader: Option<String>,
 }
 
 // Configure routes
@@ -53,19 +59,47 @@ pub fn create_router(state: AppState) -> Router {
 }
 
 // Health check endpoint
-async fn health_check() -> impl IntoResponse {
-    Json(serde_json::json!({
-        "status": "ok",
-        "service": "distributed-system-registration"
-    }))
+async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
+    let ns = state.node_state.read().await;
+    let is_leader = ns.state == crate::State::Leader;
+    let current_leader = ns.leader.clone();
+    
+    Json(StatusResponse {
+        status: "ok".to_string(),
+        service: "distributed-system-registration".to_string(),
+        is_leader,
+        current_leader,
+    })
 }
 
-// Register endpoint
+// Register endpoint - ONLY LEADER CAN PROCESS
 async fn register_user(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> impl IntoResponse {
-    info!("Registration request for username: {}", payload.username);
+    // Check if this node is the leader
+    let (is_leader, leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        info!("Registration request rejected - not leader (current leader: {:?})", leader_addr);
+        return (
+            StatusCode::FORBIDDEN,
+            Json(RegisterResponse {
+                success: false,
+                message: format!(
+                    "This node is not the leader. Current leader: {}",
+                    leader_addr.unwrap_or_else(|| "unknown".to_string())
+                ),
+                user_id: None,
+            }),
+        );
+    }
+
+    // Process registration (only if leader)
+    info!("Registration request for username: {} (I am leader)", payload.username);
 
     let user = UserInfo::new(payload.username, payload.email);
 
@@ -95,8 +129,25 @@ async fn register_user(
     }
 }
 
-// List users endpoint
+// List users endpoint - ONLY LEADER CAN PROCESS
 async fn list_users(State(state): State<AppState>) -> impl IntoResponse {
+    // Check if this node is the leader
+    let (is_leader, leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        info!("List users request rejected - not leader");
+        return (
+            StatusCode::FORBIDDEN,
+            Json(UserListResponse {
+                users: vec![],
+                count: 0,
+            }),
+        );
+    }
+
     match state.user_directory.list_users().await {
         Ok(users) => {
             let count = users.len();

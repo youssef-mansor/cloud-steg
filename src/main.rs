@@ -62,13 +62,13 @@ enum Message {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum State {
+pub enum State {
     Follower,
     Leader,
 }
 
 #[derive(Debug)]
-struct NodeState {
+pub struct NodeState {
     state: State,
     leader: Option<String>,
     last_heartbeat: Option<Instant>,
@@ -135,16 +135,35 @@ async fn main() -> anyhow::Result<()> {
     // ========================================
     // START HTTP API SERVER
     // ========================================
+
+    let peers: Vec<SocketAddr> = cfg
+        .peers
+        .iter()
+        .map(|s| s.parse().expect("invalid peer addr in config"))
+        .collect();
+
+    let shared = Arc::new(RwLock::new(NodeState {
+        state: State::Follower,
+        leader: None,
+        last_heartbeat: None,
+        term_end: None,
+        startup_time: Instant::now(),
+        current_term: 0,
+        cpu_snapshot: 0.0,
+    }));
+    
     let api_port = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3000".to_string())
         .parse::<u16>()
         .unwrap_or(3000);
-    
+
     let api_addr = format!("0.0.0.0:{}", api_port);
     let app_state = AppState {
         user_directory: user_directory.clone(),
+        node_state: shared.clone(),  // ADD THIS LINE
     };
     let app = create_router(app_state);
+
     
     let api_addr_clone = api_addr.clone();
     tokio::spawn(async move {
@@ -173,22 +192,6 @@ async fn main() -> anyhow::Result<()> {
     // START LEADER ELECTION SYSTEM
     // ========================================
     info!("Starting leader election system...");
-
-    let peers: Vec<SocketAddr> = cfg
-        .peers
-        .iter()
-        .map(|s| s.parse().expect("invalid peer addr in config"))
-        .collect();
-
-    let shared = Arc::new(RwLock::new(NodeState {
-        state: State::Follower,
-        leader: None,
-        last_heartbeat: None,
-        term_end: None,
-        startup_time: Instant::now(),
-        current_term: 0,
-        cpu_snapshot: 0.0,
-    }));
 
     let cpu = Arc::new(RwLock::new(0f32));
     let cpu_clone = cpu.clone();
