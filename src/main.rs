@@ -186,6 +186,7 @@ async fn main() -> anyhow::Result<()> {
                 info!("     POST /register   - Register new user");
                 info!("     POST /heartbeat  - Send heartbeat");
                 info!("     GET  /users      - List all users");
+                info!("     GET  /discover   - List online clients");
                 info!("");
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("HTTP API server error: {}", e);

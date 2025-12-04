@@ -22,9 +22,9 @@ SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3002 cargo run -- --config config.t
 
 
 **Register Service**
-curl -X POST http://10.40.44.249:3000/register \
+curl -X POST http://10.40.7.1:3000/register \
   -H "Content-Type: application/json" \
-  -d '{"username": "youssef", "IP": "192.168.1.50:6666"}'
+  -d '{"username": "youssef", "addr": "192.168.1.50:6666"}'
 
 
 **Heartbeat Test**
@@ -33,7 +33,7 @@ curl http://10.40.44.249:3000/
 # Response: {"success": true, "message": "Heartbeat accepted for 'alice'"}
 
 # Send heartbeat as "bob"
-curl -X POST http://10.40.44.249:3000/heartbeat \
+curl -X POST http://10.40.6.26:3000/heartbeat \
   -H "Content-Type: application/json" \
   -d '{"username": "bob"}'
 
@@ -42,3 +42,22 @@ curl http://10.40.44.249:3000/
 
 # Response will show: "online_clients_count": 2
 
+## bullshit
+
+# Terminal 1: Alice heartbeats
+while true; do
+  curl -X POST http://10.40.6.26:3000/heartbeat \
+    -H "Content-Type: application/json" \
+    -d '{"username": "alice"}' \
+    --silent --output /dev/null
+  sleep 8
+done &
+
+# Terminal 2: Bob heartbeats  
+while true; do
+  curl -X POST http://10.40.6.26:3000/heartbeat \
+    -H "Content-Type: application/json" \
+    -d '{"username": "bob"}' \
+    --silent --output /dev/null
+  sleep 12
+done &

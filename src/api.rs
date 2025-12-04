@@ -71,6 +71,14 @@ pub struct StatusResponse {
     pub online_clients_count: usize,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DiscoveryResponse {
+    pub online_clients: Vec<String>,
+    pub count: usize,
+    pub is_leader: bool,
+}
+
+
 // Configure routes
 pub fn create_router(state: AppState) -> Router {
     Router::new()
@@ -78,6 +86,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/register", post(register_user))
         .route("/heartbeat", post(heartbeat))
         .route("/users", get(list_users))
+        .route("/discover", get(discover_online))
         .with_state(state)
 }
 
@@ -247,3 +256,43 @@ async fn list_users(State(state): State<AppState>) -> impl IntoResponse {
         }
     }
 }
+
+// Discovery endpoint - ONLY LEADER CAN PROCESS
+async fn discover_online(State(state): State<AppState>) -> impl IntoResponse {
+    // Check if this node is the leader
+    let (is_leader, leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        info!("Discovery request rejected - not leader");
+        return (
+            StatusCode::FORBIDDEN,
+            Json(DiscoveryResponse {
+                online_clients: vec![],
+                count: 0,
+                is_leader: false,
+            }),
+        );
+    }
+
+    // Return currently online clients
+    let online = state.online_clients.read().await;
+    let online_list: Vec<String> = online
+        .values()
+        .map(|client| client.username.clone())
+        .collect();
+
+    info!("Discovery request served: {} clients online", online_list.len());
+
+    (
+        StatusCode::OK,
+        Json(DiscoveryResponse {
+            online_clients: online_list,
+            count: online.len(),
+            is_leader: true,
+        }),
+    )
+}
+
