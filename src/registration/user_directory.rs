@@ -40,41 +40,47 @@ impl UserDirectory {
     pub async fn register_user(&self, user: &UserInfo) -> Result<String, RegistrationError> {
         user.validate()
             .map_err(RegistrationError::ValidationError)?;
-
+        
+        // Check if username already exists in Google Drive
+        if self.find_user_by_username(&user.username).await?.is_some() {
+            return Err(RegistrationError::UserAlreadyExists(user.username.clone()));
+        }
+    
         let folder_id = self.get_folder_id();
         let json_content = serde_json::to_string_pretty(user)?;
-
+    
         let mut file_metadata = File::default();
         file_metadata.name = Some(user.filename());
         file_metadata.mime_type = Some("application/json".to_string());
         file_metadata.parents = Some(vec![folder_id.to_string()]);
-
+    
         let cursor = Cursor::new(json_content.into_bytes());
         let mut request = self
             .hub
             .files()
             .create(file_metadata)
             .param("fields", "id, name");
-
+    
         if self.is_shared_drive() {
             request = request.supports_all_drives(true);
         }
-
+    
         let result = request
             .upload(cursor, "application/json".parse().unwrap())
             .await
             .map_err(|e| {
                 RegistrationError::DriveApiError(format!("Failed to register user: {}", e))
             })?;
-
+    
         let file_id = result
             .1
             .id
             .ok_or_else(|| RegistrationError::DriveApiError("No file ID returned".to_string()))?;
-
+    
         info!("Registered user '{}' with ID: {}", user.username, user.id);
         Ok(file_id)
     }
+    
 
     pub async fn list_users(&self) -> Result<Vec<UserInfo>, RegistrationError> {
         let folder_id = self.get_folder_id();
@@ -156,5 +162,5 @@ impl UserDirectory {
     ) -> Result<Option<UserInfo>, RegistrationError> {
         let all_users = self.list_users().await?;
         Ok(all_users.into_iter().find(|u| u.username == username))
-    }
+    }    
 }

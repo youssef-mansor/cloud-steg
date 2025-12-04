@@ -16,10 +16,12 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::info;
 
+
 // Online client tracking
 #[derive(Debug, Clone)]
 pub struct OnlineClient {
     pub username: String,
+    pub addr: String,
     pub last_heartbeat: Instant,
 }
 
@@ -48,6 +50,7 @@ pub struct RegisterResponse {
 #[derive(Debug, Deserialize)]
 pub struct HeartbeatRequest {
     pub username: String,
+    pub addr: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -71,12 +74,20 @@ pub struct StatusResponse {
     pub online_clients_count: usize,
 }
 
+
+#[derive(Debug, Serialize)]
+pub struct DiscoveryClient {
+    pub username: String,
+    pub addr: String,      // IP:port
+}
+
 #[derive(Debug, Serialize)]
 pub struct DiscoveryResponse {
-    pub online_clients: Vec<String>,
+    pub online_clients: Vec<DiscoveryClient>,
     pub count: usize,
     pub is_leader: bool,
 }
+
 
 
 // Configure routes
@@ -194,28 +205,37 @@ async fn heartbeat(
         );
     }
 
-    // Update heartbeat timestamp
+    // Update heartbeat timestamp + addr
     let username = payload.username.clone();
+    let addr = payload.addr.clone();
+
     let mut online = state.online_clients.write().await;
     
     online.insert(
         username.clone(),
         OnlineClient {
             username: username.clone(),
+            addr: addr.clone(),                 // store addr
             last_heartbeat: Instant::now(),
         },
     );
 
-    info!("Heartbeat received from: {} (total online: {})", username, online.len());
+    info!(
+        "Heartbeat received from: {} at {} (total online: {})",
+        username,
+        addr,
+        online.len()
+    );
 
     (
         StatusCode::OK,
         Json(HeartbeatResponse {
             success: true,
-            message: format!("Heartbeat accepted for '{}'", username),
+            message: format!("Heartbeat accepted for '{}' at {}", username, addr),
         }),
     )
 }
+
 
 // List users endpoint - ONLY LEADER CAN PROCESS
 async fn list_users(State(state): State<AppState>) -> impl IntoResponse {
@@ -260,7 +280,7 @@ async fn list_users(State(state): State<AppState>) -> impl IntoResponse {
 // Discovery endpoint - ONLY LEADER CAN PROCESS
 async fn discover_online(State(state): State<AppState>) -> impl IntoResponse {
     // Check if this node is the leader
-    let (is_leader, leader_addr) = {
+    let (is_leader, _leader_addr) = {
         let ns = state.node_state.read().await;
         (ns.state == crate::State::Leader, ns.leader.clone())
     };
@@ -277,14 +297,20 @@ async fn discover_online(State(state): State<AppState>) -> impl IntoResponse {
         );
     }
 
-    // Return currently online clients
+    // Return currently online clients with username + addr
     let online = state.online_clients.read().await;
-    let online_list: Vec<String> = online
+    let online_list: Vec<DiscoveryClient> = online
         .values()
-        .map(|client| client.username.clone())
+        .map(|client| DiscoveryClient {
+            username: client.username.clone(),
+            addr: client.addr.clone(),
+        })
         .collect();
 
-    info!("Discovery request served: {} clients online", online_list.len());
+    info!(
+        "Discovery request served: {} clients online",
+        online_list.len()
+    );
 
     (
         StatusCode::OK,

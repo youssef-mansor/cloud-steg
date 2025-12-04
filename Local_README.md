@@ -8,10 +8,10 @@ A Rust-based distributed system with **leader election** (TCP-based) and **HTTP 
 | Endpoint   | Method | Leader Only | Description                                                  | Request                                | Response                                                              |
 |------------|--------|-------------|--------------------------------------------------------------|----------------------------------------|-----------------------------------------------------------------------|
 | `/`        | `GET`  | No          | **Health check** + online client count                       | -                                      | `{"status":"ok","is_leader":true,"online_clients_count":2}`           |
-| `/register`| `POST` | ✅ Yes      | **Register a new client** (persistent in Google Drive)       | `{"username":"alice","addr":"10.40.44.10:9000"}` | `{"success":true,"user_id":"uuid"}`                                   |
-| `/heartbeat`| `POST` | ✅ Yes      | **Mark client as online** (in-memory)                        | `{"username":"alice"}`                 | `{"success":true,"message":"Heartbeat accepted"}`                     |
-| `/users`   | `GET`  | ✅ Yes      | **List ALL registered clients** (persistent)                 | -                                      | `[{"username":"alice","addr":"10.40.44.10:9000",...}]`              |
-| `/discover`| `GET`  | ✅ Yes      | **List CURRENTLY ONLINE clients** (volatile)                 | -                                      | `{"online_clients":["alice","bob"],"count":2}`                        |
+| `/register`| `POST` | ✅ Yes      | **Register a new client** (persistent in Google Drive)       | `{"username":"alice","addr":"10.40.44.10:9000"}` | `{"success":true,"message":"User registered","user_id":"uuid"}`       |
+| `/heartbeat`| `POST` | ✅ Yes      | **Mark client as online** (in-memory)                        | `{"username":"alice","addr":"10.40.44.10:9000"}` | `{"success":true,"message":"Heartbeat accepted for 'alice' at 10.40.44.10:9000"}` |
+| `/users`   | `GET`  | ✅ Yes      | **List ALL registered clients** (persistent from Drive)      | -                                      | `{"users":[{"username":"alice","addr":"10.40.44.10:9000",...}],"count":1}` |
+| `/discover`| `GET`  | ✅ Yes      | **List CURRENTLY ONLINE clients** (volatile, in-memory)      | -                                      | `{"online_clients":[{"username":"alice","addr":"10.40.44.10:9000"}],"count":1,"is_leader":true}` |                      |
 
 **Leader-only endpoints** return `403 Forbidden` on followers with current leader info.
 
