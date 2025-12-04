@@ -25,3 +25,20 @@ SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3002 cargo run -- --config config.t
 curl -X POST http://10.40.44.249:3000/register \
   -H "Content-Type: application/json" \
   -d '{"username": "youssef", "IP": "192.168.1.50:6666"}'
+
+
+**Heartbeat Test**
+curl http://10.40.44.249:3000/
+
+# Response: {"success": true, "message": "Heartbeat accepted for 'alice'"}
+
+# Send heartbeat as "bob"
+curl -X POST http://10.40.44.249:3000/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"username": "bob"}'
+
+# Check status to see online count
+curl http://10.40.44.249:3000/
+
+# Response will show: "online_clients_count": 2
+
