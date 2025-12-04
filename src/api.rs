@@ -1,4 +1,4 @@
-//! HTTP API for user registration
+//! HTTP API for user registration and heartbeat tracking
 
 use crate::registration::{UserDirectory, UserInfo};
 use crate::NodeState;
@@ -10,15 +10,25 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::info;
+
+// Online client tracking
+#[derive(Debug, Clone)]
+pub struct OnlineClient {
+    pub username: String,
+    pub last_heartbeat: Instant,
+}
 
 // Shared application state
 #[derive(Clone)]
 pub struct AppState {
     pub user_directory: Arc<UserDirectory>,
-    pub node_state: Arc<RwLock<NodeState>>,  // ADD THIS
+    pub node_state: Arc<RwLock<NodeState>>,
+    pub online_clients: Arc<RwLock<HashMap<String, OnlineClient>>>,
 }
 
 // Request/Response types
@@ -35,6 +45,17 @@ pub struct RegisterResponse {
     pub user_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct HeartbeatRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HeartbeatResponse {
+    pub success: bool,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct UserListResponse {
     pub users: Vec<UserInfo>,
@@ -47,6 +68,7 @@ pub struct StatusResponse {
     pub service: String,
     pub is_leader: bool,
     pub current_leader: Option<String>,
+    pub online_clients_count: usize,
 }
 
 // Configure routes
@@ -54,6 +76,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(health_check))
         .route("/register", post(register_user))
+        .route("/heartbeat", post(heartbeat))
         .route("/users", get(list_users))
         .with_state(state)
 }
@@ -64,11 +87,14 @@ async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
     let is_leader = ns.state == crate::State::Leader;
     let current_leader = ns.leader.clone();
     
+    let online_count = state.online_clients.read().await.len();
+    
     Json(StatusResponse {
         status: "ok".to_string(),
         service: "distributed-system-registration".to_string(),
         is_leader,
         current_leader,
+        online_clients_count: online_count,
     })
 }
 
@@ -99,7 +125,10 @@ async fn register_user(
     }
 
     // Process registration (only if leader)
-    info!("Registration request for username: {} (I am leader)", payload.username);
+    info!(
+        "Registration request for username: {} at addr {} (I am leader)",
+        payload.username, payload.addr
+    );
 
     let user = UserInfo::new(payload.username, payload.addr);
 
@@ -130,6 +159,53 @@ async fn register_user(
             )
         }
     }
+}
+
+// Heartbeat endpoint - ONLY LEADER CAN PROCESS
+async fn heartbeat(
+    State(state): State<AppState>,
+    Json(payload): Json<HeartbeatRequest>,
+) -> impl IntoResponse {
+    // Check if this node is the leader
+    let (is_leader, leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(HeartbeatResponse {
+                success: false,
+                message: format!(
+                    "This node is not the leader. Current leader: {}",
+                    leader_addr.unwrap_or_else(|| "unknown".to_string())
+                ),
+            }),
+        );
+    }
+
+    // Update heartbeat timestamp
+    let username = payload.username.clone();
+    let mut online = state.online_clients.write().await;
+    
+    online.insert(
+        username.clone(),
+        OnlineClient {
+            username: username.clone(),
+            last_heartbeat: Instant::now(),
+        },
+    );
+
+    info!("Heartbeat received from: {} (total online: {})", username, online.len());
+
+    (
+        StatusCode::OK,
+        Json(HeartbeatResponse {
+            success: true,
+            message: format!("Heartbeat accepted for '{}'", username),
+        }),
+    )
 }
 
 // List users endpoint - ONLY LEADER CAN PROCESS

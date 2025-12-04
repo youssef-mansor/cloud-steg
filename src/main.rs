@@ -25,6 +25,7 @@ use chrono::Duration as ChronoDuration;
 use rand::Rng;
 use tracing::info;
 
+
 fn random_election_timeout(cfg: &Config) -> u64 {
     rand::thread_rng().gen_range(cfg.election_timeout_min_ms..=cfg.election_timeout_max_ms)
 }
@@ -162,14 +163,18 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "3000".to_string())
         .parse::<u16>()
         .unwrap_or(3000);
-
+    
     let api_addr = format!("0.0.0.0:{}", api_port);
+    
+    // Create online clients tracker
+    let online_clients = Arc::new(RwLock::new(HashMap::new()));
+    
     let app_state = AppState {
         user_directory: user_directory.clone(),
-        node_state: shared.clone(),  // ADD THIS LINE
+        node_state: shared.clone(),
+        online_clients: online_clients.clone(),
     };
     let app = create_router(app_state);
-
     
     let api_addr_clone = api_addr.clone();
     tokio::spawn(async move {
@@ -179,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
                 info!("   Endpoints:");
                 info!("     GET  /           - Health check");
                 info!("     POST /register   - Register new user");
+                info!("     POST /heartbeat  - Send heartbeat");
                 info!("     GET  /users      - List all users");
                 info!("");
                 if let Err(e) = axum::serve(listener, app).await {
@@ -192,7 +198,50 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Give the HTTP server a moment to start
+    // ========================================
+    // HEARTBEAT CLEANUP TASK
+    // ========================================
+    let online_clients_cleanup = online_clients.clone();
+    let shared_cleanup = shared.clone();
+    tokio::spawn(async move {
+        const CLEANUP_INTERVAL_SECS: u64 = 10;
+        const HEARTBEAT_TIMEOUT_SECS: u64 = 30;
+        
+        loop {
+            sleep(StdDuration::from_secs(CLEANUP_INTERVAL_SECS)).await;
+            
+            // Only cleanup if we're the leader
+            let is_leader = {
+                let ns = shared_cleanup.read().await;
+                ns.state == State::Leader
+            };
+            
+            if is_leader {
+                let mut online = online_clients_cleanup.write().await;
+                let before_count = online.len();
+                
+                // Remove clients that haven't sent heartbeat in 30 seconds
+                online.retain(|username, client| {
+                    let elapsed = client.last_heartbeat.elapsed().as_secs();
+                    if elapsed > HEARTBEAT_TIMEOUT_SECS {
+                        info!("Removing stale client: {} (no heartbeat for {}s)", username, elapsed);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                
+                let removed = before_count - online.len();
+                if removed > 0 {
+                    info!("Cleaned up {} stale client(s), {} remain online", removed, online.len());
+                }
+            }
+        }
+    });
+
+    // Give the HTTP server a moment to start
     sleep(StdDuration::from_millis(100)).await;
+
 
     // ========================================
     // START LEADER ELECTION SYSTEM
