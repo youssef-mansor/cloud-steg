@@ -12,7 +12,7 @@ peers = [
 
 **NEW**
 # Terminal 1 - Node 1 (also runs HTTP API on port 3000)
-SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3000 cargo run -- --config config.toml --this-node 10.40.54.163:8080
+SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA REGISTERED_USERS_FOLDER_ID=1P5o3QM-PicdKdYNQM9YRqaNje4fv6QNk API_PORT=3000 cargo run -- --config config.toml --this-node 10.40.44.249:8080
 
 # Terminal 2 - Node 2 (HTTP API on port 3001)
 SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3001 cargo run -- --config config.toml --this-node 10.40.51.185:8081
