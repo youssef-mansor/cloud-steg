@@ -22,6 +22,6 @@ SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3002 cargo run -- --config config.t
 
 
 **Register Service**
-curl -X POST http://10.40.54.163:3000/register \
+curl -X POST http://10.40.44.249:3000/register \
   -H "Content-Type: application/json" \
-  -d '{"username": "youssef", "email": "youssef@example.com"}'
+  -d '{"username": "youssef", "IP": "192.168.1.50:6666"}'

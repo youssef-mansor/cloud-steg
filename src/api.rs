@@ -25,7 +25,7 @@ pub struct AppState {
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
     pub username: String,
-    pub email: String,
+    pub addr: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,16 +101,19 @@ async fn register_user(
     // Process registration (only if leader)
     info!("Registration request for username: {} (I am leader)", payload.username);
 
-    let user = UserInfo::new(payload.username, payload.email);
+    let user = UserInfo::new(payload.username, payload.addr);
 
     match state.user_directory.register_user(&user).await {
         Ok(_) => {
-            info!("Successfully registered user: {}", user.username);
+            info!("Successfully registered user: {} at {}", user.username, user.addr);
             (
                 StatusCode::CREATED,
                 Json(RegisterResponse {
                     success: true,
-                    message: format!("User '{}' registered successfully", user.username),
+                    message: format!(
+                        "User '{}' registered successfully at {}",
+                        user.username, user.addr
+                    ),
                     user_id: Some(user.id.clone()),
                 }),
             )

@@ -8,7 +8,7 @@ use uuid::Uuid;
 pub struct UserInfo {
     pub id: String,
     pub username: String,
-    pub email: String,
+    pub addr: String,
     pub status: UserStatus,
     pub registered_at: DateTime<Utc>,
     pub last_seen: DateTime<Utc>,
@@ -24,12 +24,12 @@ pub enum UserStatus {
 }
 
 impl UserInfo {
-    pub fn new(username: impl Into<String>, email: impl Into<String>) -> Self {
+    pub fn new(username: impl Into<String>, addr: impl Into<String>) -> Self {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4().to_string(),
             username: username.into(),
-            email: email.into(),
+            addr: addr.into(),
             status: UserStatus::Active,
             registered_at: now,
             last_seen: now,
@@ -50,11 +50,12 @@ impl UserInfo {
         if self.username.is_empty() {
             return Err("Username cannot be empty".to_string());
         }
-        if self.email.is_empty() {
-            return Err("Email cannot be empty".to_string());
+        if self.addr.is_empty() {
+            return Err("Address cannot be empty".to_string());
         }
-        if !self.email.contains('@') {
-            return Err("Invalid email format".to_string());
+        // Basic IP:port validation using SocketAddr
+        if self.addr.parse::<std::net::SocketAddr>().is_err() {
+            return Err("Address must be a valid IP:port (e.g., 192.168.1.10:8080)".to_string());
         }
         Ok(())
     }
