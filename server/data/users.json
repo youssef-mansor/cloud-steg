@@ -1,14 +1,24 @@
 [
   {
     "username": "alice",
-    "password": "test123"
+    "password": "alice123",
+    "sample_images": [
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8DwHwMYGBgY/hMBGZADRJn2FkkAAAAASUVORK5CYII="
+    ]
   },
   {
     "username": "bob",
-    "password": "test123"
+    "password": "bob123",
+    "sample_images": [
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    ]
   },
   {
     "username": "charlie",
-    "password": "test123"
+    "password": "charlie123",
+    "sample_images": [
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    ]
   }
 ]
