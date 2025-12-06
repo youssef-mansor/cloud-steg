@@ -213,7 +213,7 @@ async fn find_leader_server(base_servers: &[String]) -> anyhow::Result<String> {
     
     // Try each server to find the leader
     for server in base_servers {
-        match client.get(&format!("{}/status", server)).send().await {
+        match client.get(server).send().await {
             Ok(resp) => {
                 if resp.status().is_success() {
                     if let Ok(status) = resp.json::<StatusResponse>().await {
@@ -242,9 +242,9 @@ async fn register(username: String, ip: String, port: u16, image_paths: Vec<Stri
     let servers_to_try = if base_url.contains("localhost") || base_url.contains("127.0.0.1") {
         // Try common ports for local testing
         vec![
-            format!("http://localhost:8000"),
-            format!("http://localhost:8001"),
-            format!("http://localhost:8002"),
+            format!("http://localhost:3000"),
+            format!("http://localhost:3001"),
+            format!("http://localhost:3002"),
         ]
     } else {
         // Use provided server as single option
@@ -315,9 +315,9 @@ async fn send_heartbeat(username: &str, server: &str, ip: &str, port: u16) -> an
     let base_url = server.trim_end_matches('/');
     let servers_to_try = if base_url.contains("localhost") || base_url.contains("127.0.0.1") {
         vec![
-            format!("http://localhost:8000"),
-            format!("http://localhost:8001"),
-            format!("http://localhost:8002"),
+            format!("http://localhost:3000"),
+            format!("http://localhost:3001"),
+            format!("http://localhost:3002"),
         ]
     } else {
         vec![base_url.to_string()]
@@ -423,9 +423,9 @@ async fn list_online(server: String) -> anyhow::Result<()> {
     let base_url = server.trim_end_matches('/');
     let servers_to_try = if base_url.contains("localhost") || base_url.contains("127.0.0.1") {
         vec![
-            format!("http://localhost:8000"),
-            format!("http://localhost:8001"),
-            format!("http://localhost:8002"),
+            format!("http://localhost:3000"),
+            format!("http://localhost:3001"),
+            format!("http://localhost:3002"),
         ]
     } else {
         vec![base_url.to_string()]
@@ -433,7 +433,7 @@ async fn list_online(server: String) -> anyhow::Result<()> {
     
     // Find leader server
     let leader_server = find_leader_server(&servers_to_try).await?;
-    let url = format!("{}/discovery/online", leader_server);
+    let url = format!("{}/discover", leader_server);
     
     let resp = client
         .get(&url)
@@ -620,12 +620,12 @@ async fn send_image(
     
     // Now get requester's IP and port from discovery server
     let servers_to_try = vec![
-        "http://localhost:8000".to_string(),
-        "http://localhost:8001".to_string(),
-        "http://localhost:8002".to_string(),
+        "http://localhost:3000".to_string(),
+        "http://localhost:3001".to_string(),
+        "http://localhost:3002".to_string(),
     ];
     let leader = find_leader_server(&servers_to_try).await?;
-    let discovery_url = format!("{}/discovery/online", leader);
+    let discovery_url = format!("{}/discover", leader);
     let discovery_resp = client.get(&discovery_url).send().await?;
     let discovery: DiscoveryResponse = discovery_resp.json().await?;
     

@@ -6,15 +6,10 @@ this_node = ""
 
 # List of all cluster peers (including this node)
 peers = [
- "10.40.6.26:5000",
- "10.40.7.1:5000",
- "10.40.44.249:5000",
+  "127.0.0.1:5001",
+  "127.0.0.1:5002",
+  "127.0.0.1:5003",
 ]
-#peers = [
-#  "127.0.0.1:3001",
-#  "127.0.0.1:3002",
-#  "127.0.0.1:3003",
-#]
 
 # How often leader sends heartbeat (milliseconds)
 heartbeat_interval_ms = 300
