@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Steg - User Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="screen">
+        <div class="login-container">
+            <h1>🔐 Cloud Steganography</h1>
+            <p class="subtitle">Secure P2P Image Sharing</p>
+
+            <div class="login-form">
+                <input type="text" id="usernameInput" placeholder="Enter your username" />
+                <button id="loginBtn" class="btn-primary">Login</button>
+                <button id="registerBtn" class="btn-secondary" style="margin-top: 10px;">Register New User</button>
+                <p class="hint">Enter username to Login or Register</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboardScreen" class="screen hidden">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-left">
+                <h1>🖼️ Cloud Steg</h1>
+                <span id="usernameDisplay" class="username-badge"></span>
+            </div>
+            <div class="header-right">
+                <span class="heartbeat-indicator" id="heartbeatStatus">●</span>
+                <button id="logoutBtn" class="btn-secondary">Logout</button>
+            </div>
+        </header>
+
+        <!-- Tab Navigation -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="myImages">My Images</button>
+            <button class="tab-btn" data-tab="browse">Browse Users</button>
+            <button class="tab-btn" data-tab="requests">Requests <span id="requestCount" class="badge">0</span></button>
+            <button class="tab-btn" data-tab="viewable">View Images <span id="viewableCount"
+                    class="badge">0</span></button>
+        </nav>
+
+        <!-- Tab Content -->
+        <main class="tab-content">
+
+            <!-- Tab 1: My Images -->
+            <section id="myImagesTab" class="tab-pane active">
+                <div class="tab-header">
+                    <h2>My Images</h2>
+                    <div class="upload-section">
+                        <input type="file" id="imageUpload" accept="image/*" class="file-input" />
+                        <label for="imageUpload" class="btn-primary">Upload Image (128×128)</label>
+                    </div>
+                </div>
+                <div id="myImagesGrid" class="image-grid">
+                    <p class="empty-state">No images yet. Upload your first 128×128 image!</p>
+                </div>
+            </section>
+
+            <!-- Tab 2: Browse Users -->
+            <section id="browseTab" class="tab-pane">
+                <div class="tab-header">
+                    <h2>Browse Online Users</h2>
+                    <button id="refreshUsersBtn" class="btn-secondary">🔄 Refresh</button>
+                </div>
+                <div id="usersList" class="users-list">
+                    <p class="empty-state">No users online</p>
+                </div>
+            </section>
+
+            <!-- Tab 3: Requests -->
+            <section id="requestsTab" class="tab-pane">
+                <div class="tab-header">
+                    <h2>Incoming Requests</h2>
+                    <button id="refreshRequestsBtn" class="btn-secondary">🔄 Refresh</button>
+                </div>
+                <div id="requestsList" class="requests-list">
+                    <p class="empty-state">No pending requests</p>
+                </div>
+            </section>
+
+            <!-- Tab 4: View Images -->
+            <section id="viewableTab" class="tab-pane">
+                <div class="tab-header">
+                    <h2>Images You Can View</h2>
+                    <button id="refreshViewableBtn" class="btn-secondary">🔄 Refresh</button>
+                </div>
+                <div id="viewableList" class="viewable-list">
+                    <p class="empty-state">No shared images yet</p>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Image Viewer Modal -->
+    <div id="imageModal" class="modal hidden">
+        <div class="modal-content">
+            <button class="modal-close">&times;</button>
+            <img id="modalImage" src="" alt="Image" />
+            <div class="modal-info">
+                <h3 id="modalTitle"></h3>
+                <p id="modalDetails"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request Modal -->
+    <div id="requestModal" class="modal hidden">
+        <div class="modal-content">
+            <button class="modal-close">&times;</button>
+            <h2>Request Image Access</h2>
+            <p>Send a request to view this image</p>
+            <div class="modal-form">
+                <label>Image: <span id="requestImageName"></span></label>
+                <label>From: <span id="requestUsername"></span></label>
+                <button id="sendRequestBtn" class="btn-primary">Send Request</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Approve Modal -->
+    <div id="approveModal" class="modal hidden">
+        <div class="modal-content">
+            <button class="modal-close">&times;</button>
+            <h2>Approve Access Request</h2>
+            <div class="modal-form">
+                <label>Requested Image: <span id="approveImageName"></span></label>
+                <label>Requested by: <span id="approveUsername"></span></label>
+                <label>View Count:
+                    <input type="number" id="viewCountInput" min="1" value="5" />
+                </label>
+                <label>Cover Image (128×128):
+                    <input type="file" id="coverImageInput" accept="image/*" class="file-input" />
+                    <label for="coverImageInput" class="btn-secondary">Choose Cover</label>
+                </label>
+                <button id="approveBtn" class="btn-primary">Approve & Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
