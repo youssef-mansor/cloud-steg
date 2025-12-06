@@ -8,7 +8,7 @@ use image::ImageFormat;
 
 
 
-use crate::registration::{UserDirectory, UserInfo};
+use crate::registration::{UserDirectory, UserInfo, ImageNote, NoteStorage};
 use crate::NodeState;
 use axum::{
     extract::State,
@@ -131,6 +131,29 @@ pub struct DiscoverWithImagesResponse {
     pub count: usize,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AddNoteRequest {
+    pub target_username: String,
+    pub target_image: String,
+    pub view_count_edit: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddNoteResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetNotesResponse {
+    pub notes: Vec<ImageNote>,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NoNotesResponse {
+    pub message: String,
+}
 
 
 
@@ -142,12 +165,15 @@ pub fn create_router(state: AppState) -> Router {
         .route("/heartbeat", post(heartbeat))
         .route("/users", get(list_users))
         .route("/discover", get(discover_online))
-        .route("/discover_with_images", get(discover_with_images))  // NEW
+        .route("/discover_with_images", get(discover_with_images))
         .route("/upload_image/:username", post(upload_image))
         .route("/images/:username", get(list_user_images))
         .route("/image/:username/:filename", get(download_image))
+        .route("/add_note", post(add_note))              // NEW
+        .route("/get_note/:username", get(get_notes))    // NEW
         .with_state(state)
 }
+
 
 // Health check endpoint
 async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
@@ -652,4 +678,123 @@ async fn discover_with_images(State(state): State<AppState>) -> impl IntoRespons
             count,
         }),
     )
+}
+
+// Add note endpoint - ONLY LEADER CAN PROCESS
+async fn add_note(
+    State(state): State<AppState>,
+    Json(payload): Json<AddNoteRequest>,
+) -> impl IntoResponse {
+    // Check if this node is the leader
+    let (is_leader, leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(AddNoteResponse {
+                success: false,
+                message: format!(
+                    "This node is not the leader. Current leader: {}",
+                    leader_addr.unwrap_or_else(|| "unknown".to_string())
+                ),
+            }),
+        );
+    }
+
+    let note_storage = NoteStorage::new(&state.user_directory);
+
+    match note_storage
+        .add_note(
+            &payload.target_username,
+            &payload.target_image,
+            payload.view_count_edit,
+        )
+        .await
+    {
+        Ok(_) => {
+            info!(
+                "Note added: {}/{} (view_count_edit={})",
+                payload.target_username, payload.target_image, payload.view_count_edit
+            );
+            (
+                StatusCode::CREATED,
+                Json(AddNoteResponse {
+                    success: true,
+                    message: format!(
+                        "Note added for {}/{}",
+                        payload.target_username, payload.target_image
+                    ),
+                }),
+            )
+        }
+        Err(e) => {
+            tracing::error!("Failed to add note: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(AddNoteResponse {
+                    success: false,
+                    message: format!("Failed to add note: {}", e),
+                }),
+            )
+        }
+    }
+}
+
+// Get notes endpoint - ONLY LEADER CAN PROCESS
+async fn get_notes(
+    State(state): State<AppState>,
+    axum::extract::Path(username): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    // Check if this node is the leader
+    let (is_leader, _leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "message": "This node is not the leader"
+            })),
+        )
+            .into_response();
+    }
+
+    let note_storage = NoteStorage::new(&state.user_directory);
+
+    match note_storage.get_notes(&username).await {
+        Ok(notes) => {
+            if notes.is_empty() {
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "message": format!("No notes found for user {}", username)
+                    })),
+                )
+                    .into_response()
+            } else {
+                let count = notes.len();
+                info!("Retrieved {} notes for user '{}'", count, username);
+                (
+                    StatusCode::OK,
+                    Json(GetNotesResponse { notes, count }),
+                )
+                    .into_response()
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to get notes: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "message": format!("Failed to get notes: {}", e)
+                })),
+            )
+                .into_response()
+        }
+    }
 }

@@ -185,11 +185,13 @@ async fn main() -> anyhow::Result<()> {
                 info!("     POST /heartbeat               - Send heartbeat");
                 info!("     GET  /users                   - List all registered users");
                 info!("     GET  /discover                - List online clients");
-                info!("     GET  /discover_with_images    - List online clients with images");  // NEW
+                info!("     GET  /discover_with_images    - List online clients with images");
                 info!("     POST /upload_image/:username  - Upload image (max 128x128)");
                 info!("     GET  /images/:username        - List user's images");
                 info!("     GET  /image/:username/:file   - Download specific image");
-                info!("");                
+                info!("     POST /add_note                - Add note to image");           // NEW
+                info!("     GET  /get_note/:username      - Get all notes for user");      // NEW
+                info!("");
                 if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("HTTP API server error: {}", e);
                 }

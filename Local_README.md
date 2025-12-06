@@ -1,7 +1,8 @@
+Here's the updated README with the note system:
 
 # Distributed Leader Election + Client Registration & Discovery
 
-A Rust-based distributed system with **leader election** (TCP-based) and **HTTP API** for client registration, heartbeat tracking, peer discovery, image storage, and bulk image retrieval.
+A Rust-based distributed system with **leader election** (TCP-based) and **HTTP API** for client registration, heartbeat tracking, peer discovery, image storage, note management, and bulk image retrieval.
 
 ## Features
 
@@ -10,6 +11,7 @@ A Rust-based distributed system with **leader election** (TCP-based) and **HTTP 
 - ✅ **Heartbeat Tracking**: In-memory online status (30s timeout)
 - ✅ **Peer Discovery**: Query currently online clients
 - ✅ **Image Upload**: Store images per user (max 128×128)
+- ✅ **Image Notes**: Add metadata notes to user images (public, anyone-to-anyone)
 - ✅ **Bulk Image Retrieval**: Download all online clients' images in one request
 - ✅ **Leader-only Operations**: Followers redirect to current leader
 
@@ -28,6 +30,8 @@ A Rust-based distributed system with **leader election** (TCP-based) and **HTTP 
 | `/upload_image/:username` | `POST` | ✅ Yes | **Upload image for user** (max 128×128, registered users only) | Multipart form data: `image` field | `{"success":true,"message":"Image uploaded","filename":"timestamp-uuid.png"}` |
 | `/images/:username` | `GET` | ✅ Yes | **List all images for a user** | - | `{"images":["1733511234-a1b2.png","1733512000-c3d4.jpg"],"count":2}` |
 | `/image/:username/:filename` | `GET` | ✅ Yes | **Download specific image** | - | Binary image data |
+| `/add_note` | `POST` | ✅ Yes | **Add note to user's image** (anyone-to-anyone, public) | `{"target_username":"alice","target_image":"1733511234-a1b2.png","view_count_edit":5}` | `{"success":true,"message":"Note added for alice/1733511234-a1b2.png"}` |
+| `/get_note/:username` | `GET` | ✅ Yes | **Get all notes for a user** | - | `{"notes":[{"image_filename":"...","view_count_edit":5}],"count":1}` or `{"message":"No notes found"}` |
 
 **Leader-only endpoints** return `403 Forbidden` on followers with current leader info.
 
@@ -43,16 +47,21 @@ bucket-root/
       images/
         1733511234-a1b2c3d4.png
         1733512000-e5f6g7h8.jpg
+      notes/                    # Image notes (NEW)
+        1733511234-a1b2c3d4.png.json
+        1733512000-e5f6g7h8.jpg.json
     bob/
       profile.json
       images/
         1733513000-xyz123.png
+      notes/
+        1733513000-xyz123.png.json
 ```
 
 **Benefits:**
 - ✅ Fast user lookup: `users/{username}/profile.json`
 - ✅ Easy image retrieval: `users/{username}/images/*`
-- ✅ Organized per-user data
+- ✅ Organized per-user notes: `users/{username}/notes/*`
 - ✅ No scanning required
 
 ***
@@ -149,6 +158,8 @@ Distributed System: Leader Election + User Registration
      POST /upload_image/:username  - Upload image (max 128x128)
      GET  /images/:username        - List user's images
      GET  /image/:username/:file   - Download specific image
+     POST /add_note                - Add note to image
+     GET  /get_note/:username      - Get all notes for user
 
 ✓ Leader election TCP listener bound to 127.0.0.1:8080
 ✓ All systems operational!
@@ -205,7 +216,69 @@ curl http://localhost:3000/images/alice
 curl http://localhost:3000/image/alice/1733511234-a1b2c3d4.png --output downloaded.png
 ```
 
-### Step 4: Send Heartbeats (simulate online clients)
+### Step 4: Add Notes to Images
+
+```bash
+# Add note to alice's first image
+curl -X POST http://localhost:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_username": "alice",
+    "target_image": "1733511234-a1b2c3d4.png",
+    "view_count_edit": 5
+  }'
+# {"success":true,"message":"Note added for alice/1733511234-a1b2c3d4.png"}
+
+# Add note to alice's second image
+curl -X POST http://localhost:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_username": "alice",
+    "target_image": "1733511235-e5f6g7h8.png",
+    "view_count_edit": 10
+  }'
+
+# Add note to bob's image (anyone can add notes to anyone)
+curl -X POST http://localhost:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_username": "bob",
+    "target_image": "1733513000-xyz123.png",
+    "view_count_edit": 3
+  }'
+
+# Get all notes for alice
+curl http://localhost:3000/get_note/alice
+# {
+#   "notes": [
+#     {
+#       "image_filename": "1733511234-a1b2c3d4.png",
+#       "view_count_edit": 5
+#     },
+#     {
+#       "image_filename": "1733511235-e5f6g7h8.png",
+#       "view_count_edit": 10
+#     }
+#   ],
+#   "count": 2
+# }
+
+# Get notes for user with no notes
+curl http://localhost:3000/get_note/bob
+# {"message":"No notes found for user bob"} (if bob has no notes yet)
+
+# Update existing note (overwrite)
+curl -X POST http://localhost:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_username": "alice",
+    "target_image": "1733511234-a1b2c3d4.png",
+    "view_count_edit": 15
+  }'
+# Note for that image is now updated to view_count_edit=15
+```
+
+### Step 5: Send Heartbeats (simulate online clients)
 
 ```bash
 # Alice heartbeat loop (every 10s)
@@ -225,7 +298,7 @@ while true; do
 done &
 ```
 
-### Step 5: Test Discovery
+### Step 6: Test Discovery
 
 ```bash
 # Online clients only (metadata)
@@ -241,7 +314,7 @@ curl http://localhost:3000/users
 # {"users":[{"id":"uuid","username":"alice","addr":"10.40.6.26:9000",...}],"count":2}
 ```
 
-### Step 6: Bulk Download with Script
+### Step 7: Bulk Download with Script
 
 ```bash
 # Make script executable
@@ -287,7 +360,7 @@ chmod +x download_online_clients.sh
     1733513000-xyz123.png
 ```
 
-### Step 7: Test Leader Election
+### Step 8: Test Leader Election
 
 ```bash
 # Kill leader node (Ctrl+C on Terminal 1)
@@ -298,7 +371,7 @@ curl http://localhost:3001/
 # {"status":"ok","is_leader":true,"online_clients_count":0,"current_leader":"127.0.0.1:8081"}
 ```
 
-### Step 8: Test Heartbeat Timeout
+### Step 9: Test Heartbeat Timeout
 
 ```bash
 # Stop one heartbeat loop (kill background job)
@@ -312,7 +385,7 @@ curl http://localhost:3000/discover
 # {"online_clients":[{"username":"bob","addr":"10.40.6.26:9001"}],"count":1}  (alice timed out)
 ```
 
-### Step 9: Test Follower Rejection
+### Step 10: Test Follower Rejection
 
 ```bash
 # Try heartbeat on follower
@@ -321,6 +394,42 @@ curl -X POST http://localhost:3002/heartbeat \
   -d '{"username": "charlie", "addr": "10.40.6.26:9002"}'
 # {"success":false,"message":"This node is not the leader. Current leader: 127.0.0.1:8081"}
 ```
+
+***
+
+## Note System Features
+
+### Access Control
+- **Public notes**: Anyone can add notes to anyone's images
+- **No ownership required**: Don't need to own the image to add a note
+- **Overwrites**: Adding a note to an image that already has one replaces it
+
+### Use Cases
+```bash
+# Client A adds note to their own image
+curl -X POST http://LEADER:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{"target_username":"alice","target_image":"img.png","view_count_edit":1}'
+
+# Client B adds note to Alice's image (allowed)
+curl -X POST http://LEADER:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{"target_username":"alice","target_image":"img.png","view_count_edit":5}'
+
+# Retrieve all notes for alice
+curl http://LEADER:3000/get_note/alice
+```
+
+### Note Structure
+```json
+{
+  "image_filename": "1733511234-a1b2c3d4.png",
+  "view_count_edit": 5
+}
+```
+
+- **image_filename**: Reference to the image
+- **view_count_edit**: Integer metadata (client-defined, no server logic)
 
 ***
 
@@ -421,12 +530,20 @@ done &
 curl -X POST http://LEADER_IP:3000/upload_image/myclient \
   -F "image=@my_image.png"
 
-# 4. Discover online peers
+# 4. Add notes to images
+curl -X POST http://LEADER_IP:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{"target_username":"myclient","target_image":"my_image.png","view_count_edit":1}'
+
+# 5. Discover online peers
 curl http://LEADER_IP:3000/discover
 # Use returned addresses to connect peer-to-peer
 
-# 5. Bulk download all peers' images
+# 6. Bulk download all peers' images
 ./download_online_clients.sh http://LEADER_IP:3000
+
+# 7. Get notes for a user
+curl http://LEADER_IP:3000/get_note/myclient
 ```
 
 ***
@@ -464,15 +581,17 @@ Clients ── heartbeat(10s) ──→ Leader ── online list (30s timeout) 
               │                        │                              ──→ /discover_with_images
               ├── register ───────────→ Firebase Storage (persistent)
               │                         ├─ users/{username}/profile.json
-              └── upload_image ────────→ └─ users/{username}/images/*.png
+              ├── upload_image ────────→ ├─ users/{username}/images/*.png
+              └── add_note ────────────→ └─ users/{username}/notes/*.json
                                          ↑
-                                      /users, /images, bulk download
+                                      /users, /images, /get_note, bulk download
 ```
 
 **Key Components:**
 - **Leader election:** TCP, CPU-based with random timeouts (3-5s)
 - **Registration:** Firebase Storage (`users/{username}/profile.json`)
 - **Images:** Firebase Storage (`users/{username}/images/*`)
+- **Notes:** Firebase Storage (`users/{username}/notes/*`)
 - **Online tracking:** In-memory HashMap (resets on leader change)
 - **Heartbeat:** 10s interval, 30s timeout
 - **Bulk retrieval:** JSON + base64, max 20 images per user
@@ -493,6 +612,32 @@ Clients ── heartbeat(10s) ──→ Leader ── online list (30s timeout) 
 curl -X POST http://localhost:3000/upload_image/alice \
   -F "image=@large_image.png"
 # {"success":false,"message":"Upload failed: Validation error: Image too large: 256x256 (max 128x128)"}
+```
+
+***
+
+## Note System Rules
+
+1. ✅ **Public access:** Anyone can add notes to anyone's images
+2. ✅ **Validation:** Target user and image must exist
+3. ✅ **Overwrite:** Adding note to image with existing note replaces it
+4. ✅ **Metadata:** `view_count_edit` is client-controlled integer (no server logic)
+5. ✅ **Leader-only:** Both add and get operations require leader
+6. ✅ **Storage:** One JSON file per image in `users/{username}/notes/`
+
+**Example note errors:**
+```bash
+# Image doesn't exist
+curl -X POST http://localhost:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{"target_username":"alice","target_image":"fake.png","view_count_edit":1}'
+# {"success":false,"message":"Failed to add note: Validation error: Image not found: fake.png"}
+
+# User doesn't exist
+curl -X POST http://localhost:3000/add_note \
+  -H "Content-Type: application/json" \
+  -d '{"target_username":"nobody","target_image":"img.png","view_count_edit":1}'
+# {"success":false,"message":"Failed to add note: User not found: nobody"}
 ```
 
 ***
@@ -518,6 +663,11 @@ curl -X POST http://localhost:3000/upload_image/alice \
 - Verify image is ≤128×128: `identify image.png`
 - Check user is registered: `curl http://LEADER/users`
 - Ensure format is PNG/JPEG/WebP
+
+**Note addition fails:**
+- Verify target user exists: `curl http://LEADER/users`
+- Verify target image exists: `curl http://LEADER/images/{username}`
+- Check you're connected to leader node
 
 **Bulk download script fails:**
 - Install `jq`: `sudo apt-get install jq`

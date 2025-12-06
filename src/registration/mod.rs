@@ -3,13 +3,15 @@
 pub mod auth;
 pub mod config;
 pub mod error;
-pub mod image_storage;  // NEW
+pub mod image_storage;
+pub mod note_storage;  // NEW
 pub mod user_directory;
 pub mod user_info;
 
 pub use auth::FirebaseAuth;
 pub use config::RegistrationConfig;
 pub use error::RegistrationError;
-pub use image_storage::ImageStorage;  // NEW
+pub use image_storage::ImageStorage;
+pub use note_storage::{ImageNote, NoteStorage};  // NEW
 pub use user_directory::UserDirectory;
 pub use user_info::{UserInfo, UserStatus};
