@@ -1,0 +1,12 @@
+{
+  "33481329-444f-4a5d-8781-f998f33c98b0": {
+    "request_id": "33481329-444f-4a5d-8781-f998f33c98b0",
+    "requester": "bob",
+    "owner": "alice",
+    "photo_id": "0",
+    "max_views": 3,
+    "current_views": 0,
+    "created_at": "2025-12-05T13:30:57.891460Z",
+    "expires_at": "2025-12-06T13:30:57.891460Z"
+  }
+}

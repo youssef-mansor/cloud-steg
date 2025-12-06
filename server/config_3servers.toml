@@ -1,0 +1,29 @@
+# Config for 3 servers running locally
+# Each server should use --this-node to override this value
+
+this_node = "127.0.0.1:5001"
+peers = [
+  "127.0.0.1:5001",
+  "127.0.0.1:5002",
+  "127.0.0.1:5003",
+]
+
+# How often leader sends heartbeat (milliseconds)
+heartbeat_interval_ms = 300
+
+# Randomized election timeout range (milliseconds)
+election_timeout_min_ms = 9000
+election_timeout_max_ms = 15000
+
+# Duration of a leader term in milliseconds (30 seconds)
+leader_term_ms = 30000
+
+# Timeout for network operations (milliseconds)
+net_timeout_ms = 1000
+
+# How often to refresh local CPU measurement (ms)
+cpu_refresh_ms = 500
+
+# Election retry wait (ms) - wait between retries to contact peers
+election_retry_ms = 200
+

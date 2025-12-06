@@ -1,0 +1,50 @@
+{
+  "2b0baf60-e318-4b31-bf16-85e300a5e2a9": {
+    "requester": "charlie",
+    "owner": "alice",
+    "photo_id": "0",
+    "message": "I also want access"
+  },
+  "21328417-b650-4ac1-bd8a-0b34d5e99883": {
+    "requester": "charlie",
+    "owner": "alice",
+    "photo_id": "0",
+    "message": "I also want access"
+  },
+  "34aa55e5-862c-4923-a079-8e9c3efa3ef1": {
+    "requester": "bob",
+    "owner": "alice",
+    "photo_id": "0",
+    "message": "Hi Alice, can I see your photo?"
+  },
+  "09c5df63-5b5b-43f0-aed8-2fe646cc7cac": {
+    "requester": "testalice",
+    "owner": "testalice",
+    "photo_id": "0",
+    "message": "test"
+  },
+  "aab35cff-7997-45b4-8004-8f69fde9f803": {
+    "requester": "charlie",
+    "owner": "alice",
+    "photo_id": "0",
+    "message": "I also want access"
+  },
+  "1fd39eaf-81ef-40dd-bc11-8d467e942f91": {
+    "requester": "testalice",
+    "owner": "testalice",
+    "photo_id": "0",
+    "message": "test"
+  },
+  "2f8a24a0-cc63-450d-ae6f-a6cb5bfe9628": {
+    "requester": "bob",
+    "owner": "alice",
+    "photo_id": "0",
+    "message": "Hi Alice, can I see your photo?"
+  },
+  "0cbe7737-430e-4e14-a5f3-84da6f5131b6": {
+    "requester": "bob",
+    "owner": "alice",
+    "photo_id": "0",
+    "message": "Hi Alice, can I see your photo?"
+  }
+}

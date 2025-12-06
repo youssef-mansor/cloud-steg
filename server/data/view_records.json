@@ -1,0 +1,52 @@
+{
+  "34aa55e5-862c-4923-a079-8e9c3efa3ef1": {
+    "request_id": "34aa55e5-862c-4923-a079-8e9c3efa3ef1",
+    "requester": "bob",
+    "owner": "alice",
+    "photo_id": "0",
+    "max_views": 3,
+    "current_views": 3,
+    "created_at": "2025-12-05T12:54:04.285568Z",
+    "expires_at": "2025-12-05T14:54:04.285568Z"
+  },
+  "1fd39eaf-81ef-40dd-bc11-8d467e942f91": {
+    "request_id": "1fd39eaf-81ef-40dd-bc11-8d467e942f91",
+    "requester": "testalice",
+    "owner": "testalice",
+    "photo_id": "0",
+    "max_views": 2,
+    "current_views": 0,
+    "created_at": "2025-12-05T12:55:54.650482Z",
+    "expires_at": "2025-12-05T13:55:54.650482Z"
+  },
+  "2f8a24a0-cc63-450d-ae6f-a6cb5bfe9628": {
+    "request_id": "2f8a24a0-cc63-450d-ae6f-a6cb5bfe9628",
+    "requester": "bob",
+    "owner": "alice",
+    "photo_id": "0",
+    "max_views": 3,
+    "current_views": 3,
+    "created_at": "2025-12-05T12:54:20.798478Z",
+    "expires_at": "2025-12-05T14:54:20.798478Z"
+  },
+  "0cbe7737-430e-4e14-a5f3-84da6f5131b6": {
+    "request_id": "0cbe7737-430e-4e14-a5f3-84da6f5131b6",
+    "requester": "bob",
+    "owner": "alice",
+    "photo_id": "0",
+    "max_views": 3,
+    "current_views": 3,
+    "created_at": "2025-12-05T12:53:45.593387Z",
+    "expires_at": "2025-12-05T14:53:45.593387Z"
+  },
+  "09c5df63-5b5b-43f0-aed8-2fe646cc7cac": {
+    "request_id": "09c5df63-5b5b-43f0-aed8-2fe646cc7cac",
+    "requester": "testalice",
+    "owner": "testalice",
+    "photo_id": "0",
+    "max_views": 2,
+    "current_views": 0,
+    "created_at": "2025-12-05T12:55:51.482066Z",
+    "expires_at": "2025-12-05T13:55:51.482066Z"
+  }
+}

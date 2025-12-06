@@ -1,0 +1,57 @@
+[1;33mCleaning up old test data...[0m
+[1;33mStarting server...[0m
+Waiting for server to start...
+
+[0;34m=== Test 1: Server Health Check ===[0m
+[0;32m✓ Server is running[0m
+
+[0;34m=== Test 3: User Registration ===[0m
+[0;31m✗ Alice registration[0m
+Response: {"error":"exists"}
+[0;31m✗ Bob registration[0m
+Response: {"error":"exists"}
+[0;32m✓ Duplicate registration rejected[0m
+
+[0;34m=== Test 4: Heartbeat System ===[0m
+[0;32m✓ Alice heartbeat[0m
+[0;32m✓ Bob heartbeat[0m
+
+[0;34m=== Test 5: Discovery - Online Users ===[0m
+[0;32m✓ Discovery shows both users online[0m
+Discovery response: {"online":[{"username":"alice","ip":"192.168.1.10","port":6000},{"username":"bob","ip":"192.168.1.20","port":6001}]}
+
+[0;34m=== Test 6: Photo Request Workflow ===[0m
+[0;32m✓ Photo request created (ID: 34aa55e5-862c-4923-a079-8e9c3efa3ef1)[0m
+[0;32m✓ Alice sees pending request[0m
+
+[0;34m=== Test 7: Photo Approval ===[0m
+[0;32m✓ Photo request approved[0m
+
+[0;34m=== Test 8: View Count Mechanism ===[0m
+[0;32m✓ Bob sees access record[0m
+[0;32m✓ View 1 successful (views remaining: 2)[0m
+[0;32m✓ View 2 successful (views remaining: 1)[0m
+[0;32m✓ View 3 successful (views remaining: 0)[0m
+[0;32m✓ 4th view correctly rejected (limit exceeded)[0m
+
+[0;34m=== Test 9: Request Denial ===[0m
+[0;32m✓ Request denial works[0m
+
+[0;34m=== Test 10: Client CLI Commands ===[0m
+[0;32m✓ CLI list-online works[0m
+
+[0;34m=== Test 11: TTL Expiration Test ===[0m
+[0;32m✓ User appears online after heartbeat[0m
+
+[0;34m========================================[0m
+[0;34mTest Summary[0m
+[0;34m========================================[0m
+[0;32mTests Passed: 16[0m
+[0;31mTests Failed: 2[0m
+
+[0;31mFailed Tests:[0m
+  - Alice registration
+  - Bob registration
+
+[1;33mCleaning up...[0m
+[0;31mSome tests failed. Check output above.[0m
