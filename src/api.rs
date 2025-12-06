@@ -22,7 +22,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};  // ADD warn here
+use base64::Engine;          // ADD this line
+
 
 
 // Online client tracking
@@ -110,6 +112,26 @@ pub struct ImageListResponse {
     pub count: usize,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ImageWithData {
+    pub filename: String,
+    pub data: String,  // base64 encoded
+}
+
+#[derive(Debug, Serialize)]
+pub struct OnlineClientWithImages {
+    pub username: String,
+    pub addr: String,
+    pub images: Vec<ImageWithData>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiscoverWithImagesResponse {
+    pub online_clients: Vec<OnlineClientWithImages>,
+    pub count: usize,
+}
+
+
 
 
 // Configure routes
@@ -120,9 +142,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/heartbeat", post(heartbeat))
         .route("/users", get(list_users))
         .route("/discover", get(discover_online))
-        .route("/upload_image/:username", post(upload_image))        // NEW
-        .route("/images/:username", get(list_user_images))           // NEW
-        .route("/image/:username/:filename", get(download_image))    // NEW
+        .route("/discover_with_images", get(discover_with_images))  // NEW
+        .route("/upload_image/:username", post(upload_image))
+        .route("/images/:username", get(list_user_images))
+        .route("/image/:username/:filename", get(download_image))
         .with_state(state)
 }
 
@@ -533,4 +556,100 @@ async fn download_image(
         Ok(data) => Ok(data),
         Err(e) => Err((StatusCode::NOT_FOUND, format!("Image not found: {}", e))),
     }
+}
+
+// Discover with images endpoint - ONLY LEADER CAN PROCESS
+async fn discover_with_images(State(state): State<AppState>) -> impl IntoResponse {
+    // Check if this node is the leader
+    let (is_leader, leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        info!("Discover with images request rejected - not leader");
+        return (
+            StatusCode::FORBIDDEN,
+            Json(DiscoverWithImagesResponse {
+                online_clients: vec![],
+                count: 0,
+            }),
+        );
+    }
+
+    // Get online clients from heartbeat HashMap
+    let online = state.online_clients.read().await;
+    let online_usernames: Vec<(String, String)> = online
+        .values()
+        .map(|client| (client.username.clone(), client.addr.clone()))
+        .collect();
+    drop(online); // Release lock
+
+    info!(
+        "Discover with images request: {} clients online",
+        online_usernames.len()
+    );
+
+    let image_storage = ImageStorage::new(&state.user_directory);
+    let mut clients_with_images = Vec::new();
+
+    // For each online client, fetch their images
+    for (username, addr) in online_usernames {
+        let mut images_data = Vec::new();
+
+        // List images for this user
+        match image_storage.list_images(&username).await {
+            Ok(image_filenames) => {
+                // Limit to 20 images per user
+                let limited_filenames: Vec<_> = image_filenames.into_iter().take(20).collect();
+
+                info!(
+                    "Fetching {} images for user '{}'",
+                    limited_filenames.len(),
+                    username
+                );
+
+                // Download each image and base64 encode
+                for filename in limited_filenames {
+                    match image_storage.download_image(&username, &filename).await {
+                        Ok(data) => {
+                            // Base64 encode
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+                            images_data.push(ImageWithData {
+                                filename,
+                                data: encoded,
+                            });
+                        }
+                        Err(e) => {
+                            warn!("Failed to download image {}/{}: {}", username, filename, e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to list images for user '{}': {}", username, e);
+                // Continue with empty images for this user
+            }
+        }
+
+        clients_with_images.push(OnlineClientWithImages {
+            username: username.clone(),
+            addr,
+            images: images_data,
+        });
+    }
+
+    let count = clients_with_images.len();
+    info!(
+        "Discover with images response prepared: {} clients",
+        count
+    );
+
+    (
+        StatusCode::OK,
+        Json(DiscoverWithImagesResponse {
+            online_clients: clients_with_images,
+            count,
+        }),
+    )
 }
