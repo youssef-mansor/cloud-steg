@@ -13,17 +13,14 @@ pub enum RegistrationError {
     #[error("Failed to parse credentials: {0}")]
     CredentialsParseError(#[from] serde_json::Error),
 
-    #[error("Google Drive API error: {0}")]
-    DriveApiError(String),
+    #[error("Firebase Storage API error: {0}")]
+    FirebaseApiError(String),
 
     #[error("User not found: {0}")]
     UserNotFound(String),
 
     #[error("User already exists: {0}")]
     UserAlreadyExists(String),
-
-    #[error("Folder not found: {0}")]
-    FolderNotFound(String),
 
     #[error("Configuration error: {0}")]
     ConfigError(String),

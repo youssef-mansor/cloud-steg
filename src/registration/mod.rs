@@ -1,4 +1,4 @@
-//! User registration module using Google Drive
+//! User registration module using Firebase Storage
 
 pub mod auth;
 pub mod config;
@@ -6,7 +6,7 @@ pub mod error;
 pub mod user_directory;
 pub mod user_info;
 
-pub use auth::DriveAuth;
+pub use auth::FirebaseAuth;
 pub use config::RegistrationConfig;
 pub use error::RegistrationError;
 pub use user_directory::UserDirectory;

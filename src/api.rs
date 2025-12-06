@@ -150,6 +150,40 @@ async fn register_user(
         payload.username, payload.addr
     );
 
+    // CHECK: Username must be unique in Google Drive
+    info!("Checking if username '{}' already exists...", payload.username);
+    
+    let all_users = match state.user_directory.list_users().await {
+        Ok(users) => users,
+        Err(e) => {
+            tracing::error!("Failed to list users for uniqueness check: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(RegisterResponse {
+                    success: false,
+                    message: format!("Failed to verify username: {}", e),
+                    user_id: None,
+                }),
+            );
+        }
+    };
+
+    // Check if username already exists
+    if all_users.iter().any(|u| u.username == payload.username) {
+        info!("Registration rejected: username '{}' already exists", payload.username);
+        return (
+            StatusCode::CONFLICT,
+            Json(RegisterResponse {
+                success: false,
+                message: format!("Username '{}' is already registered", payload.username),
+                user_id: None,
+            }),
+        );
+    }
+
+    info!("Username '{}' is available, proceeding with registration", payload.username);
+
+    // Create and register the new user
     let user = UserInfo::new(payload.username, payload.addr);
 
     match state.user_directory.register_user(&user).await {
@@ -180,6 +214,8 @@ async fn register_user(
         }
     }
 }
+
+
 
 // Heartbeat endpoint - ONLY LEADER CAN PROCESS
 async fn heartbeat(

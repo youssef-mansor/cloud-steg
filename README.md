@@ -22,7 +22,7 @@ SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3002 cargo run -- --config config.t
 
 
 **Register Service**
-curl -X POST http://10.40.7.1:3000/register \
+curl -X POST http://10.40.6.26:3000/register \
   -H "Content-Type: application/json" \
   -d '{"username": "youssef", "addr": "192.168.1.50:6666"}'
 
@@ -61,3 +61,6 @@ while true; do
     --silent --output /dev/null
   sleep 12
 done &
+
+
+now I want to add a new endpoint called "advertise" where clients can upload images to be added to their profile (the one on google drive). The request should include the client's IP address, base64 images (or whatever can be uploaded easily to google drive), the request can have 1 or more images. The restrictions here are that the users uploading images should already be registered on the system. and the images should be a max of 128*128.

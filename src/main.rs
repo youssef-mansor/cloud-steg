@@ -112,24 +112,21 @@ async fn main() -> anyhow::Result<()> {
     // ========================================
     info!("Initializing user registration system...");
     
-    let shared_drive_id = std::env::var("SHARED_DRIVE_ID")
-        .unwrap_or_else(|_| "0AEwep46IAWKDUk9PVA".to_string());
-
-    let credentials_path = std::env::var("GOOGLE_CREDENTIALS")
-        .unwrap_or_else(|_| "credentials/service-account.json".to_string());
-
-    let users_folder_id = std::env::var("REGISTERED_USERS_FOLDER_ID")
-        .expect("REGISTERED_USERS_FOLDER_ID env var must be set to existing 'registered-users' folder ID");
-
-    let reg_config = RegistrationConfig::new(&credentials_path, users_folder_id)
-        .with_shared_drive(shared_drive_id);
-
-
-
+    let bucket_name = std::env::var("FIREBASE_BUCKET")
+        .expect("FIREBASE_BUCKET environment variable must be set (e.g., your-project.appspot.com)");
+    
+    let credentials_path = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
+        .unwrap_or_else(|_| "credentials/firebase-storage.json".to_string());
+    
+    let reg_config = RegistrationConfig::new(
+        &credentials_path,
+        bucket_name,
+        "registered-users",  // Folder prefix in Firebase Storage
+    );
 
     let user_directory = match UserDirectory::new(reg_config).await {
         Ok(dir) => {
-            info!("✓ User registration system initialized");
+            info!("✓ User registration system initialized (Firebase Storage)");
             Arc::new(dir)
         }
         Err(e) => {
@@ -138,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
             return Err(e.into());
         }
     };
+
 
     // ========================================
     // START HTTP API SERVER

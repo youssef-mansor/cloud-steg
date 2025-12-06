@@ -1,64 +1,39 @@
-//! Google Drive authentication
+//! Firebase Storage authentication using service account
 
 use crate::registration::error::RegistrationError;
-use google_drive3::DriveHub;
-use google_drive3::hyper_util::client::legacy::connect::HttpConnector;
-use hyper_rustls::HttpsConnector;
+use cloud_storage::Client;
+use std::env;
 use std::path::Path;
-use yup_oauth2::{ServiceAccountAuthenticator, ServiceAccountKey};
 
-pub type AuthenticatedHub = DriveHub<HttpsConnector<HttpConnector>>;
+pub struct FirebaseAuth;
 
-pub struct DriveAuth;
-
-impl DriveAuth {
-    pub async fn create_hub(
-        credentials_path: impl AsRef<Path>,
-    ) -> Result<AuthenticatedHub, RegistrationError> {
+impl FirebaseAuth {
+    /// Create a Firebase Storage client using service account credentials
+    ///
+    /// # Arguments
+    /// * `credentials_path` - Path to the service account JSON file
+    ///
+    /// # Returns
+    /// A configured Firebase Storage Client ready to make API calls
+    pub fn create_client(credentials_path: impl AsRef<Path>) -> Result<Client, RegistrationError> {
         let credentials_path = credentials_path.as_ref();
 
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let key_data = std::fs::read_to_string(credentials_path).map_err(|e| {
-            RegistrationError::CredentialsFileError(std::io::Error::new(
-                e.kind(),
-                format!(
-                    "Failed to read credentials file '{}': {}",
-                    credentials_path.display(),
-                    e
+        // Verify credentials file exists
+        if !credentials_path.exists() {
+            return Err(RegistrationError::CredentialsFileError(
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Credentials file not found: {}", credentials_path.display()),
                 ),
-            ))
-        })?;
+            ));
+        }
 
-        let service_account_key: ServiceAccountKey =
-            serde_json::from_str(&key_data).map_err(|e| {
-                RegistrationError::AuthError(format!(
-                    "Failed to parse service account key: {}",
-                    e
-                ))
-            })?;
+        // Set SERVICE_ACCOUNT env var for cloud-storage crate
+        env::set_var("SERVICE_ACCOUNT", credentials_path);
 
-        let auth = ServiceAccountAuthenticator::builder(service_account_key)
-            .build()
-            .await
-            .map_err(|e| {
-                RegistrationError::AuthError(format!("Failed to build authenticator: {}", e))
-            })?;
+        // Create client
+        let client = Client::default();
 
-        let hub = DriveHub::new(
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .build(
-                    hyper_rustls::HttpsConnectorBuilder::new()
-                        .with_native_roots()
-                        .unwrap()
-                        .https_or_http()
-                        .enable_http1()
-                        .enable_http2()
-                        .build(),
-                ),
-            auth,
-        );
-
-        Ok(hub)
+        Ok(client)
     }
 }
