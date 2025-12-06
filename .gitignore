@@ -1,8 +1,20 @@
-# Rust build files
+# Rust
 /target/
+Cargo.lock
+**/*.rs.bk
 
-# Editor/IDE files (optional, if using VSCode)
+# IDE
+.idea/
 .vscode/
 *.swp
+*.swo
+*~
+.DS_Store
 
-credentials/service-account.json
+# OS
+.DS_Store
+Thumbs.db
+
+# Data and logs
+*.log
+test_output.log

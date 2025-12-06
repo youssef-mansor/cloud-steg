@@ -1,0 +1,8 @@
+# Rust build files
+/target/
+
+# Editor/IDE files (optional, if using VSCode)
+.vscode/
+*.swp
+
+credentials/service-account.json
