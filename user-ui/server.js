@@ -106,7 +106,7 @@ function stopHeartbeat(username) {
 
 // ============== Registration ==============
 
-const CLIENT_IP = process.env.CLIENT_IP || '10.40.44.139';
+const CLIENT_IP = process.env.CLIENT_IP || '10.40.48.133';
 const CLIENT_PORT = parseInt(process.env.PORT) || 8000;
 
 app.post('/api/register', async (req, res) => {
