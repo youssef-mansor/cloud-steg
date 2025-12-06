@@ -19,7 +19,7 @@ clap = { version = "4.2", features = ["derive"] }
 rand = "0.8" 
 
 # HTTP endpoint
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 
@@ -33,4 +33,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
-# REMOVED: All Google Drive dependencies (google-drive3, yup-oauth2, hyper, hyper-util, hyper-rustls, http-body-util, rustls)
+image = "0.25"

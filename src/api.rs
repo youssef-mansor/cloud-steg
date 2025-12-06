@@ -1,5 +1,13 @@
 //! HTTP API for user registration and heartbeat tracking
 
+
+
+use crate::registration::ImageStorage;
+use axum::extract::Multipart;
+use image::ImageFormat;
+
+
+
 use crate::registration::{UserDirectory, UserInfo};
 use crate::NodeState;
 use axum::{
@@ -89,6 +97,20 @@ pub struct DiscoveryResponse {
 }
 
 
+#[derive(Debug, Serialize)]
+pub struct ImageUploadResponse {
+    pub success: bool,
+    pub message: String,
+    pub filename: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImageListResponse {
+    pub images: Vec<String>,
+    pub count: usize,
+}
+
+
 
 // Configure routes
 pub fn create_router(state: AppState) -> Router {
@@ -98,6 +120,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/heartbeat", post(heartbeat))
         .route("/users", get(list_users))
         .route("/discover", get(discover_online))
+        .route("/upload_image/:username", post(upload_image))        // NEW
+        .route("/images/:username", get(list_user_images))           // NEW
+        .route("/image/:username/:filename", get(download_image))    // NEW
         .with_state(state)
 }
 
@@ -358,3 +383,154 @@ async fn discover_online(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
+// Upload image endpoint - ONLY LEADER CAN PROCESS
+async fn upload_image(
+    State(state): State<AppState>,
+    axum::extract::Path(username): axum::extract::Path<String>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    // Check if this node is the leader
+    let (is_leader, leader_addr) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ImageUploadResponse {
+                success: false,
+                message: format!(
+                    "This node is not the leader. Current leader: {}",
+                    leader_addr.unwrap_or_else(|| "unknown".to_string())
+                ),
+                filename: None,
+            }),
+        );
+    }
+
+    // Extract image data from multipart
+    let mut image_data = None;
+    let mut format = ImageFormat::Png; // default
+
+    while let Some(field) = multipart.next_field().await.unwrap_or(None) {
+        let name = field.name().unwrap_or("").to_string();
+        
+        if name == "image" {
+            let content_type = field.content_type().unwrap_or("").to_string();
+            format = if content_type.contains("jpeg") || content_type.contains("jpg") {
+                ImageFormat::Jpeg
+            } else if content_type.contains("webp") {
+                ImageFormat::WebP
+            } else {
+                ImageFormat::Png
+            };
+
+            image_data = Some(field.bytes().await.unwrap_or_default().to_vec());
+        }
+    }
+
+    let Some(data) = image_data else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ImageUploadResponse {
+                success: false,
+                message: "No image data provided".to_string(),
+                filename: None,
+            }),
+        );
+    };
+
+    // Upload image
+    let image_storage = ImageStorage::new(&state.user_directory);
+    
+    match image_storage.upload_image(&username, data, format).await {
+        Ok(filename) => {
+            info!("Image uploaded for user '{}': {}", username, filename);
+            (
+                StatusCode::CREATED,
+                Json(ImageUploadResponse {
+                    success: true,
+                    message: format!("Image uploaded successfully"),
+                    filename: Some(filename),
+                }),
+            )
+        }
+        Err(e) => {
+            tracing::error!("Image upload failed: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ImageUploadResponse {
+                    success: false,
+                    message: format!("Upload failed: {}", e),
+                    filename: None,
+                }),
+            )
+        }
+    }
+}
+
+// List images endpoint - ONLY LEADER CAN PROCESS
+async fn list_user_images(
+    State(state): State<AppState>,
+    axum::extract::Path(username): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let (is_leader, _) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ImageListResponse {
+                images: vec![],
+                count: 0,
+            }),
+        );
+    }
+
+    let image_storage = ImageStorage::new(&state.user_directory);
+    
+    match image_storage.list_images(&username).await {
+        Ok(images) => {
+            let count = images.len();
+            (
+                StatusCode::OK,
+                Json(ImageListResponse { images, count }),
+            )
+        }
+        Err(e) => {
+            tracing::error!("Failed to list images: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ImageListResponse {
+                    images: vec![],
+                    count: 0,
+                }),
+            )
+        }
+    }
+}
+
+// Download image endpoint - ONLY LEADER CAN PROCESS
+async fn download_image(
+    State(state): State<AppState>,
+    axum::extract::Path((username, filename)): axum::extract::Path<(String, String)>,
+) -> impl IntoResponse {
+    let (is_leader, _) = {
+        let ns = state.node_state.read().await;
+        (ns.state == crate::State::Leader, ns.leader.clone())
+    };
+
+    if !is_leader {
+        return Err((StatusCode::FORBIDDEN, "Not leader".to_string()));
+    }
+
+    let image_storage = ImageStorage::new(&state.user_directory);
+    
+    match image_storage.download_image(&username, &filename).await {
+        Ok(data) => Ok(data),
+        Err(e) => Err((StatusCode::NOT_FOUND, format!("Image not found: {}", e))),
+    }
+}
