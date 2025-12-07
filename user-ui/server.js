@@ -312,9 +312,39 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
         const thumbnailPath = path.join(userImagesDir, thumbnailFilename);
         await fs.writeFile(thumbnailPath, thumbnailBuffer);
 
-        // Skip server upload - cluster endpoint is too slow/broken (times out >30s)
-        // Images are saved locally and will be served via P2P
-        console.log(`✅ Upload complete: original + thumbnail saved locally (using P2P for cross-device)`);
+        // Upload thumbnail to server (Firebase now works)
+        try {
+            const FormData = require('form-data');
+            const formData = new FormData();
+            formData.append('image', thumbnailBuffer, {
+                filename: originalName,
+                contentType: 'image/png'
+            });
+
+            // Try uploading to each server directly
+            let uploadSuccess = false;
+            for (const server of serverEndpoints) {
+                try {
+                    const response = await axios.post(`${server}/upload_image/${username}`, formData, {
+                        headers: formData.getHeaders(),
+                        timeout: 30000
+                    });
+                    console.log(`✅ Thumbnail uploaded to ${server}`);
+                    uploadSuccess = true;
+                    break;
+                } catch (e) {
+                    console.log(`❌ Failed to upload to ${server}:`, e.message);
+                }
+            }
+
+            if (uploadSuccess) {
+                console.log(`✅ Upload complete: original + thumbnail saved locally, thumbnail uploaded to server`);
+            } else {
+                console.warn('⚠️ Server upload failed on all servers, but local save succeeded');
+            }
+        } catch (e) {
+            console.warn('Server upload failed, but local save succeeded:', e.message);
+        }
 
         res.json({
             success: true,
@@ -696,6 +726,7 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
 
         const metadata = {
             from: approver,
+            to: requester,  // ADD: specify the recipient
             originalImage: requestedImage,
             viewCount: parseInt(viewCount),
             timestamp: Date.now()
@@ -786,9 +817,24 @@ app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => 
             return res.status(404).json({ error: 'No users on this device' });
         }
 
-        // Save to the first (and typically only) user on this device
-        const username = users[0];
-        const viewableDir = path.join(dataDir, username, 'viewable');
+        // Save to the correct recipient user (from metadata.to field)
+        let recipientUsername = null;
+
+        // Check if metadata has 'to' field
+        if (metadata.to) {
+            // Check if this user exists on this device
+            if (users.includes(metadata.to)) {
+                recipientUsername = metadata.to;
+            }
+        }
+
+        // Fallback to first user if recipient not found
+        if (!recipientUsername) {
+            recipientUsername = users[0];
+            console.warn(`Recipient '${metadata.to}' not found on this device, saving to first user: ${recipientUsername}`);
+        }
+
+        const viewableDir = path.join(dataDir, recipientUsername, 'viewable');
         await fs.mkdir(viewableDir, { recursive: true });
 
         const stegFilename = req.file.originalname;
@@ -798,7 +844,7 @@ app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => 
         const metadataPath = path.join(viewableDir, `${stegFilename}.json`);
         await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 
-        console.log(`📨 Steg image received for ${username} from ${metadata.from}`);
+        console.log(`📨 Steg image received for ${recipientUsername} from ${metadata.from}`);
 
         res.json({ success: true });
     } catch (e) {
