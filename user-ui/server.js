@@ -702,9 +702,11 @@ app.post('/api/update-view-count', async (req, res) => {
             } catch (e) {
                 console.log(`P2P update failed: ${e.message}`);
             }
+        } else {
+            console.log(`Recipient ${recipient} not online`);
         }
 
-        // Fallback to cluster if P2P failed
+        // Try cluster as backup (non-critical - don't fail if this doesn't work)
         if (!p2pSuccess) {
             try {
                 await broadcastRequest('/add_note', {
@@ -717,12 +719,20 @@ app.post('/api/update-view-count', async (req, res) => {
                 });
                 console.log(`📝 View count update stored in cluster for ${recipient}`);
             } catch (clusterErr) {
-                console.warn(`Failed to store in cluster:`, clusterErr.message);
-                return res.status(500).json({ error: 'Update failed' });
+                console.warn(`⚠️ Cluster sync failed (recipient will sync on next login):`, clusterErr.message);
+                // Don't fail the request - cluster is just a backup
             }
         }
 
-        res.json({ success: true, message: 'View count updated' });
+        if (!p2pSuccess && !recipientUser) {
+            // Only fail if recipient doesn't exist at all (neither online nor registered)
+            return res.status(404).json({ error: 'Recipient not found. They will get the update when they log in next.' });
+        }
+
+        res.json({
+            success: true,
+            message: p2pSuccess ? 'View count updated immediately' : 'View count will update when recipient logs in'
+        });
 
     } catch (e) {
         console.error('Update view count error:', e.message);
