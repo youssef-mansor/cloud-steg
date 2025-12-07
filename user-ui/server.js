@@ -312,7 +312,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
         const thumbnailPath = path.join(userImagesDir, thumbnailFilename);
         await fs.writeFile(thumbnailPath, thumbnailBuffer);
 
-        // Upload thumbnail to server
+        //Upload thumbnail to server
         try {
             const FormData = require('form-data');
             const formData = new FormData();
@@ -321,13 +321,27 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
                 contentType: 'image/png'
             });
 
-            const response = await broadcastRequest(`/upload_image/${username}`, {
-                method: 'POST',
-                data: formData,
-                headers: formData.getHeaders()
-            });
+            // Try uploading to each server directly (not using broadcastRequest which doesn't handle FormData well)
+            let uploadSuccess = false;
+            for (const server of serverEndpoints) {
+                try {
+                    const response = await axios.post(`${server}/upload_image/${username}`, formData, {
+                        headers: formData.getHeaders(),
+                        timeout: 10000
+                    });
+                    console.log(`✅ Thumbnail uploaded to ${server}`);
+                    uploadSuccess = true;
+                    break; // Success on one server is enough (it will replicate)
+                } catch (e) {
+                    console.log(`❌ Failed to upload to ${server}:`, e.message);
+                }
+            }
 
-            console.log(`✅ Upload complete: original + thumbnail saved locally, thumbnail uploaded to server`);
+            if (uploadSuccess) {
+                console.log(`✅ Upload complete: original + thumbnail saved locally, thumbnail uploaded to server`);
+            } else {
+                console.warn('⚠️ Server upload failed on all servers, but local save succeeded');
+            }
         } catch (e) {
             console.warn('Server upload failed, but local save succeeded:', e.message);
         }
