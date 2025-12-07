@@ -12,7 +12,11 @@ const PORT = process.env.PORT || 5000;
 // Server endpoints (active servers in cluster)
 const serverEndpoints = process.env.SERVER_ENDPOINTS
     ? process.env.SERVER_ENDPOINTS.split(',')
-    : ['http://10.40.45.27:3000', 'http://10.10.36.216:3000', 'http://10.40.54.163:3000'];
+    : [
+        'http://10.40.45.27:3000',
+        'http://10.40.36.216:3000',  // Fixed: was 10.10.36.216
+        'http://10.40.54.163:3000'
+    ];
 
 // Middleware
 app.use(express.json());
