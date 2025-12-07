@@ -656,8 +656,17 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
         const imagesDir = path.join(__dirname, 'data', approver, 'images');
         let originalImagePath = path.join(imagesDir, requestedImage);
 
+        // Check if exact file exists
+        let exactFileExists = false;
+        try {
+            await fs.access(originalImagePath);
+            exactFileExists = true;
+        } catch (e) {
+            exactFileExists = false;
+        }
+
         // If exact match fails, try finding by base name
-        if (!fs.existsSync(originalImagePath)) {
+        if (!exactFileExists) {
             const files = await fs.readdir(imagesDir);
             // Extract the timestamp and original filename part regardless of extension
             const baseMatch = requestedImage.match(/^(\d+)-original-(.*)\.[^.]+$/);
