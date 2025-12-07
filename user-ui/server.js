@@ -69,7 +69,7 @@ async function broadcastRequest(path, options = {}) {
     const promises = serverEndpoints.map(async (server) => {
         try {
             const url = `${server}${path}`;
-            const response = await axios({ url, ...options, timeout: 5000 }); // Increased timeout
+            const response = await axios({ ...options, url, timeout: options.timeout || 10000 }); // Increased to 10s for slow leaders
             return { server, response };
         } catch (e) {
             console.log(`❌ ${server}${path} failed: ${e.message}`);
