@@ -629,12 +629,23 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
 // Endpoint to receive steg images from other UI servers
 app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => {
     try {
-        const metadata = JSON.parse(req.body.metadata);
+        if (!req.file) {
+            return res.status(400).json({ error: 'No steg image provided' });
+        }
+
+        const metadata = typeof req.body.metadata === 'string'
+            ? JSON.parse(req.body.metadata)
+            : req.body.metadata;
         const stegImageBuffer = req.file.buffer;
 
         // Save to first local user's viewable folder
         const dataDir = path.join(__dirname, 'data');
         const users = await fs.readdir(dataDir).catch(() => []);
+
+        if (users.length === 0) {
+            console.error('No users found on this device');
+            return res.status(404).json({ error: 'No users on this device' });
+        }
 
         for (const username of users) {
             const viewableDir = path.join(dataDir, username, 'viewable');
