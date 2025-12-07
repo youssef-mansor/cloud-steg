@@ -14,7 +14,7 @@ use tokio::time::sleep;
 #[command(about = "Simple client for distributed server cluster")]
 struct Cli {
     /// Comma-separated list of server addresses (e.g., "http://10.40.6.26:3000,http://10.40.7.1:3001")
-    #[arg(long, value_delimiter = ',', default_value = "http://10.40.45.27:3000")]
+    #[arg(long, value_delimiter = ',', default_value = "http://10.40.45.27:3000,http://10.40.36.216:3000,http://10.40.54.163:3000")]
     servers: Vec<String>,
 
     #[command(subcommand)]

@@ -836,9 +836,15 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
         const requestData = JSON.parse(await fs.readFile(requestPath, 'utf8'));
         const { from: requester, image: requestedImage } = requestData;
 
+        // Convert thumbnail name to original name if needed
+        let imageName = requestedImage;
+        if (imageName.includes('-thumb-')) {
+            imageName = imageName.replace('-thumb-', '-original-');
+        }
+
         // Find the actual original file (handle extension mismatch, e.g. .jpg vs .png)
         const imagesDir = path.join(__dirname, 'data', approver, 'images');
-        let originalImagePath = path.join(imagesDir, requestedImage);
+        let originalImagePath = path.join(imagesDir, imageName);
 
         // Check if exact file exists
         let exactFileExists = false;
@@ -849,11 +855,11 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
             exactFileExists = false;
         }
 
-        // If exact match fails, try finding by base name
+        // If exact match fails, try finding by base name (handle different extensions)
         if (!exactFileExists) {
             const files = await fs.readdir(imagesDir);
             // Extract the timestamp and original filename part regardless of extension
-            const baseMatch = requestedImage.match(/^(\d+)-original-(.*)\.[^.]+$/);
+            const baseMatch = imageName.match(/^(\d+)-original-(.*)\.[^.]+$/);
             if (baseMatch) {
                 const timestamp = baseMatch[1];
                 const cleanName = baseMatch[2];
@@ -864,11 +870,15 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
 
                 if (foundFile) {
                     originalImagePath = path.join(imagesDir, foundFile);
+                    imageName = foundFile;
                     console.log(`Found matching original file with different extension: ${foundFile}`);
                 } else {
+                    console.error(`Original image not found. Requested: ${requestedImage}, Looking for: ${imageName}`);
+                    console.error(`Available files in ${imagesDir}:`, files.filter(f => f.includes('-original-')));
                     return res.status(404).json({ error: 'Original image file not found' });
                 }
             } else {
+                console.error(`Could not parse image name: ${imageName}`);
                 return res.status(404).json({ error: 'Original image file not found' });
             }
         }
@@ -878,7 +888,7 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
         const metadata = {
             from: approver,
             to: requester,  // ADD: specify the recipient
-            originalImage: requestedImage,
+            originalImage: imageName,  // Use the actual original image filename
             viewCount: parseInt(viewCount),
             timestamp: Date.now()
         };
