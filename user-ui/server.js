@@ -907,6 +907,8 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
         // Get requester's address and send steg image to their UI
         const usersResponse = await broadcastRequest('/users', { method: 'GET' });
         const requesterUser = usersResponse.data.users.find(u => u.username === requester);
+        
+        let deliverySuccess = false;
 
         if (requesterUser) {
             const requesterURL = `http://${requesterUser.addr}`;
@@ -924,49 +926,47 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
                 });
 
                 console.log(`✅ Steg image sent to ${requester} at ${requesterURL}`);
+                deliverySuccess = true;
             } catch (e) {
-                console.warn(`Failed to send to ${requester}, saving locally AND to cluster:`, e.message);
+                console.warn(`⚠️ Failed to send to ${requester} via P2P (${requesterURL}):`, e.message);
+            }
+        } else {
+            console.warn(`⚠️ Requester ${requester} not found in cluster`);
+        }
 
-                // Fallback: save locally
+        // If P2P delivery failed, store backup locally for later sync
+        if (!deliverySuccess) {
+            try {
                 const requesterViewableDir = path.join(__dirname, 'data', requester, 'viewable');
                 await fs.mkdir(requesterViewableDir, { recursive: true });
                 const stegImagePath = path.join(requesterViewableDir, stegFilename);
                 await fs.writeFile(stegImagePath, stegImageBuffer);
                 const metadataPath = path.join(requesterViewableDir, `${stegFilename}.json`);
                 await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+                console.log(`✅ Steg image stored in fallback location for ${requester}`);
+                deliverySuccess = true;
+            } catch (fallbackErr) {
+                console.warn(`⚠️ Failed to store in fallback location:`, fallbackErr.message);
+            }
+        }
 
-                // ALSO: Send view count update to cluster for offline sync
-                try {
-                    await broadcastRequest('/add_note', {
-                        method: 'POST',
-                        data: {
-                            target_username: requester,
-                            target_image: requestedImage,
-                            view_count_edit: parseInt(viewCount)
-                        }
-                    });
-                    console.log(`📝 View count update stored in cluster for offline user ${requester}`);
-                } catch (clusterErr) {
-                    console.warn(`Failed to store view count in cluster:`, clusterErr.message);
+        // Always sync view count with cluster for consistency
+        try {
+            await broadcastRequest('/add_note', {
+                method: 'POST',
+                data: {
+                    target_username: requester,
+                    target_image: requestedImage,
+                    view_count_edit: parseInt(viewCount)
                 }
-            }
-        } else {
-            console.warn(`Requester ${requester} not found in cluster`);
+            });
+            console.log(`📝 View count synchronized with cluster for ${requester}`);
+        } catch (clusterErr) {
+            console.warn(`⚠️ Failed to sync view count with cluster:`, clusterErr.message);
+        }
 
-            // Still try to store view count update in cluster
-            try {
-                await broadcastRequest('/add_note', {
-                    method: 'POST',
-                    data: {
-                        target_username: requester,
-                        target_image: requestedImage,
-                        view_count_edit: parseInt(viewCount)
-                    }
-                });
-                console.log(`📝 View count update stored in cluster for offline user ${requester}`);
-            } catch (clusterErr) {
-                console.warn(`Failed to store view count in cluster:`, clusterErr.message);
-            }
+        if (!deliverySuccess) {
+            console.warn(`⚠️ WARNING: Image delivery incomplete - requester may retrieve on next login`);
         }
 
         await fs.unlink(requestPath);
@@ -1081,6 +1081,18 @@ app.get('/api/viewable', async (req, res) => {
         const viewableDir = path.join(__dirname, 'data', username, 'viewable');
 
         let images = [];
+        // Safely create viewable directory if it does not exist
+        try {
+            await fs.mkdir(viewableDir, { recursive: true });
+        } catch (e) {
+            console.warn(`Failed to ensure viewable directory exists for ${username}:`, e.message);
+        }
+        // Safely create viewable directory if it doesn't exist
+        try {
+            await fs.mkdir(viewableDir, { recursive: true });
+        } catch (e) {
+            console.warn(`Failed to ensure viewable directory exists for ${username}:`, e.message);
+        }
         try {
             const files = await fs.readdir(viewableDir);
             const stegFiles = files.filter(f => f.startsWith('steg-') && f.endsWith('.png'));
