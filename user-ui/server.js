@@ -69,7 +69,7 @@ async function broadcastRequest(path, options = {}) {
     const promises = serverEndpoints.map(async (server) => {
         try {
             const url = `${server}${path}`;
-            const response = await axios({ ...options, url, timeout: options.timeout || 10000 }); // Increased to 10s for slow leaders
+            const response = await axios({ url, ...options, timeout: 5000 }); // Increased timeout
             return { server, response };
         } catch (e) {
             console.log(`❌ ${server}${path} failed: ${e.message}`);
@@ -362,7 +362,7 @@ app.get('/api/user-images/:username', async (req, res) => {
                 const ownerURL = `http://${ownerUser.addr}`;
                 console.log(`📡 Fetching ${username}'s images from P2P at ${ownerURL}`);
 
-                const response = await axios.get(`${ownerURL}/p2p-images`, { timeout: 5000 });
+                const response = await axios.get(`${ownerURL}/p2p-images?username=${username}`, { timeout: 5000 });
                 if (response.data && response.data.images) {
                     return res.json(response.data);
                 }
@@ -446,39 +446,42 @@ app.get('/api/image/:username/:filename', async (req, res) => {
     }
 });
 
-// P2P endpoint: serve local thumbnails to other devices
+// P2P endpoint: serve local thumbnails to other devices for a specific user
 app.get('/p2p-images', async (req, res) => {
     try {
-        // Find local users and return their thumbnails
-        const dataDir = path.join(__dirname, 'data');
-        const users = await fs.readdir(dataDir).catch(() => []);
+        const { username } = req.query;
 
-        let allThumbnails = [];
-        for (const username of users) {
-            const userImagesDir = path.join(dataDir, username, 'images');
-            try {
-                const files = await fs.readdir(userImagesDir);
-                const thumbnails = files.filter(f => f.includes('-thumb-') && f.match(/\.(png|jpg|jpeg|webp)$/i));
-                allThumbnails = allThumbnails.concat(thumbnails);
-            } catch (e) {
-                // Skip if no images folder
-            }
+        if (!username) {
+            return res.status(400).json({ error: 'Username required' });
         }
 
-        res.json({ images: allThumbnails, count: allThumbnails.length });
+        // Return ONLY this user's thumbnails
+        const userImagesDir = path.join(__dirname, 'data', username, 'images');
+        let thumbnails = [];
+
+        try {
+            const files = await fs.readdir(userImagesDir);
+            thumbnails = files.filter(f => f.includes('-thumb-') && f.match(/\.(png|jpg|jpeg|webp)$/i));
+        } catch (e) {
+            // User has no images folder
+        }
+
+        res.json({ images: thumbnails, count: thumbnails.length });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-// P2P endpoint: serve individual image file
+// P2P endpoint: serve individual image file (prioritize thumbnails)
 app.get('/p2p-image/:filename', async (req, res) => {
     try {
         const { filename } = req.params;
+        const { username } = req.query;
 
-        // Find the image in any local user's folder
         const dataDir = path.join(__dirname, 'data');
-        const users = await fs.readdir(dataDir).catch(() => []);
+
+        // If username specified, look only in that user's folder
+        const usersToCheck = username ? [username] : await fs.readdir(dataDir).catch(() => []);
 
         for (const username of users) {
             const imagePath = path.join(dataDir, username, 'images', filename);
