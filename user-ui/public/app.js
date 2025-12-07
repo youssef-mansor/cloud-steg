@@ -630,7 +630,9 @@ sendRequestBtn.addEventListener('click', sendViewRequest);
 approveBtn.addEventListener('click', approveWithCover);
 
 // Modal close buttons
-btn.closest('.modal').classList.add('hidden');
+document.querySelectorAll('.modal-close').forEach(btn => {
+    btn.addEventListener('click', () => {
+        btn.closest('.modal').classList.add('hidden');
     });
 });
 
