@@ -473,6 +473,62 @@ app.get('/api/image/:username/:filename', async (req, res) => {
     }
 });
 
+// Login endpoint (for UI to establish session and sync notes)
+app.post('/api/login', async (req, res) => {
+    try {
+        const username = req.body.username;
+        if (!username) {
+            return res.status(400).json({ error: 'Username required' });
+        }
+
+        req.session.username = username;
+
+        // Start heartbeat
+        startHeartbeat(username);
+
+        // Sync view count updates from cluster (for offline period)
+        try {
+            const notesResponse = await broadcastRequest(`/get_note/${username}`, { method: 'GET' });
+
+            if (notesResponse.data && notesResponse.data.notes && notesResponse.data.notes.length > 0) {
+                console.log(`📥 Found ${notesResponse.data.notes.length} pending view count updates for ${username}`);
+
+                for (const note of notesResponse.data.notes) {
+                    const { image_filename, view_count_edit } = note;
+
+                    // Find and update the viewable metadata
+                    const viewableDir = path.join(__dirname, 'data', username, 'viewable');
+                    try {
+                        const files = await fs.readdir(viewableDir);
+
+                        for (const file of files) {
+                            if (!file.endsWith('.json')) continue;
+
+                            const metadataPath = path.join(viewableDir, file);
+                            const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+
+                            if (metadata.originalImage === image_filename) {
+                                metadata.viewCount = view_count_edit;
+                                await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+                                console.log(`✅ Updated view count for ${image_filename} to ${view_count_edit}`);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to apply view count update for ${image_filename}:`, e.message);
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('No pending view count updates or cluster unreachable:', e.message);
+        }
+
+        res.json({ success: true, username });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // P2P endpoint: serve local thumbnails to other devices for a specific user
 app.get('/p2p-images', async (req, res) => {
     try {
@@ -761,7 +817,7 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
 
                 console.log(`✅ Steg image sent to ${requester} at ${requesterURL}`);
             } catch (e) {
-                console.warn(`Failed to send to ${requester}, saving locally:`, e.message);
+                console.warn(`Failed to send to ${requester}, saving locally AND to cluster:`, e.message);
 
                 // Fallback: save locally
                 const requesterViewableDir = path.join(__dirname, 'data', requester, 'viewable');
@@ -770,6 +826,38 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
                 await fs.writeFile(stegImagePath, stegImageBuffer);
                 const metadataPath = path.join(requesterViewableDir, `${stegFilename}.json`);
                 await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+
+                // ALSO: Send view count update to cluster for offline sync
+                try {
+                    await broadcastRequest('/add_note', {
+                        method: 'POST',
+                        data: {
+                            target_username: requester,
+                            target_image: requestedImage,
+                            view_count_edit: parseInt(viewCount)
+                        }
+                    });
+                    console.log(`📝 View count update stored in cluster for offline user ${requester}`);
+                } catch (clusterErr) {
+                    console.warn(`Failed to store view count in cluster:`, clusterErr.message);
+                }
+            }
+        } else {
+            console.warn(`Requester ${requester} not found in cluster`);
+
+            // Still try to store view count update in cluster
+            try {
+                await broadcastRequest('/add_note', {
+                    method: 'POST',
+                    data: {
+                        target_username: requester,
+                        target_image: requestedImage,
+                        view_count_edit: parseInt(viewCount)
+                    }
+                });
+                console.log(`📝 View count update stored in cluster for offline user ${requester}`);
+            } catch (clusterErr) {
+                console.warn(`Failed to store view count in cluster:`, clusterErr.message);
             }
         }
 
