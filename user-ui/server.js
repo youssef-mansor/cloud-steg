@@ -1089,6 +1089,44 @@ app.post('/api/view-image', async (req, res) => {
         } else {
             metadata.viewCount = newViewCount;
             await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+
+            // Sync updated view count back to approver
+            try {
+                const usersResponse = await broadcastRequest('/users', { method: 'GET' });
+                const approverUser = usersResponse.data.users.find(u => u.username === sender);
+
+                let syncSuccess = false;
+                if (approverUser) {
+                    // Try P2P update to approver
+                    const approverURL = `http://${approverUser.addr}`;
+                    try {
+                        await axios.post(`${approverURL}/sync-approved-view-count`, {
+                            recipient: username,
+                            image: originalImage,
+                            viewCount: newViewCount
+                        }, { timeout: 5000 });
+                        console.log(`📊 View count synced to approver ${sender} via P2P`);
+                        syncSuccess = true;
+                    } catch (e) {
+                        console.log(`P2P sync to approver failed: ${e.message}`);
+                    }
+                }
+
+                // Fallback: store in cluster if P2P failed
+                if (!syncSuccess) {
+                    await broadcastRequest('/add_note', {
+                        method: 'POST',
+                        data: {
+                            target_username: sender,
+                            target_image: originalImage,
+                            view_count_edit: newViewCount
+                        }
+                    });
+                    console.log(`📝 View count update stored in cluster for approver ${sender}`);
+                }
+            } catch (e) {
+                console.log(`Failed to sync view count to approver: ${e.message}`);
+            }
         }
 
         res.set('Content-Type', 'image/png');
