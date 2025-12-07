@@ -422,35 +422,82 @@ app.post('/api/request-view', async (req, res) => {
     const fromUser = req.session.username;
 
     try {
-        const userDir = path.join(__dirname, 'data', username, 'requests');
-        await fs.mkdir(userDir, { recursive: true });
-
         const request = {
             from: fromUser,
             image: image,
             timestamp: Date.now()
         };
 
-        const requestFile = path.join(userDir, `${Date.now()}-${fromUser}.json`);
-        await fs.writeFile(requestFile, JSON.stringify(request, null, 2));
+        // Get recipient's address from cluster
+        const usersResponse = await broadcastRequest('/users', { method: 'GET' });
+        const recipient = usersResponse.data.users.find(u => u.username === username);
 
-        console.log(`📬 Request saved locally: ${fromUser} -> ${username} for ${image}`);
+        if (!recipient) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
-        // BROADCAST to all servers to ensure delivery
+        // Extract recipient's UI server address (their addr is like "10.7.17.14:8000")
+        const recipientAddr = recipient.addr;
+        const recipientURL = `http://${recipientAddr}`;
+
+        console.log(`📬 Sending request to ${username} at ${recipientURL}`);
+
+        // Send request directly to recipient's UI server
         try {
-            await broadcastRequest('/request-notification', {
-                method: 'POST',
-                data: { to: username, from: fromUser, image },
-                headers: { 'Content-Type': 'application/json' }
-            });
-            console.log(`📡 Request broadcasted to all servers`);
+            await axios.post(`${recipientURL}/receive-request`, {
+                from: fromUser,
+                image: image,
+                timestamp: request.timestamp
+            }, { timeout: 5000 });
+
+            console.log(`✅ Request delivered to ${username}`);
         } catch (e) {
-            console.warn('Server broadcast failed:', e.message);
+            console.warn(`Failed to deliver to ${username}'s UI, storing locally:`, e.message);
+
+            // Fallback: Save locally for same-device testing
+            const userDir = path.join(__dirname, 'data', username, 'requests');
+            await fs.mkdir(userDir, { recursive: true });
+            const requestFile = path.join(userDir, `${Date.now()}-${fromUser}.json`);
+            await fs.writeFile(requestFile, JSON.stringify(request, null, 2));
         }
 
         res.json({ success: true, message: 'Request sent' });
     } catch (e) {
         console.error('Request send error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Endpoint to receive requests from other UI servers
+app.post('/receive-request', async (req, res) => {
+    try {
+        const { from, image, timestamp } = req.body;
+
+        // Get the current logged-in user (recipient)
+        // Since this is cross-device, we need to determine who should receive this
+        // We'll save it for ALL local users, or use a query parameter
+
+        // For now, extract username from the image request context
+        // Better: use query param or scan all local users
+
+        // Let's find which local user this request is for by checking session or scanning
+        const dataDir = path.join(__dirname, 'data');
+        const users = await fs.readdir(dataDir).catch(() => []);
+
+        for (const username of users) {
+            const requestsDir = path.join(dataDir, username, 'requests');
+            await fs.mkdir(requestsDir, { recursive: true });
+
+            const requestFile = path.join(requestsDir, `${timestamp}-${from}.json`);
+            await fs.writeFile(requestFile, JSON.stringify({ from, image, timestamp }, null, 2));
+
+            console.log(`📨 Request received for ${username} from ${from}`);
+            break; // Only save to first user (the owner of this UI instance)
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error('Receive request error:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -522,15 +569,40 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
 
         const stegImageBuffer = await steg.embedDataInImage(coverTempPath, encryptedData);
 
-        const requesterViewableDir = path.join(__dirname, 'data', requester, 'viewable');
-        await fs.mkdir(requesterViewableDir, { recursive: true });
-
         const stegFilename = `steg-${Date.now()}.png`;
-        const stegImagePath = path.join(requesterViewableDir, stegFilename);
-        await fs.writeFile(stegImagePath, stegImageBuffer);
 
-        const metadataPath = path.join(requesterViewableDir, `${stegFilename}.json`);
-        await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+        // Get requester's address and send steg image to their UI
+        const usersResponse = await broadcastRequest('/users', { method: 'GET' });
+        const requesterUser = usersResponse.data.users.find(u => u.username === requester);
+
+        if (requesterUser) {
+            const requesterURL = `http://${requesterUser.addr}`;
+
+            try {
+                // Send steg image directly to requester's UI
+                const FormData = require('form-data');
+                const formData = new FormData();
+                formData.append('stegImage', stegImageBuffer, { filename: stegFilename });
+                formData.append('metadata', JSON.stringify(metadata));
+
+                await axios.post(`${requesterURL}/receive-steg-image`, formData, {
+                    headers: formData.getHeaders(),
+                    timeout: 10000
+                });
+
+                console.log(`✅ Steg image sent to ${requester} at ${requesterURL}`);
+            } catch (e) {
+                console.warn(`Failed to send to ${requester}, saving locally:`, e.message);
+
+                // Fallback: save locally
+                const requesterViewableDir = path.join(__dirname, 'data', requester, 'viewable');
+                await fs.mkdir(requesterViewableDir, { recursive: true });
+                const stegImagePath = path.join(requesterViewableDir, stegFilename);
+                await fs.writeFile(stegImagePath, stegImageBuffer);
+                const metadataPath = path.join(requesterViewableDir, `${stegFilename}.json`);
+                await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+            }
+        }
 
         await fs.unlink(requestPath);
         await fs.unlink(coverTempPath).catch(() => { });
@@ -544,6 +616,38 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 })
+
+// Endpoint to receive steg images from other UI servers
+app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => {
+    try {
+        const metadata = JSON.parse(req.body.metadata);
+        const stegImageBuffer = req.file.buffer;
+
+        // Save to first local user's viewable folder
+        const dataDir = path.join(__dirname, 'data');
+        const users = await fs.readdir(dataDir).catch(() => []);
+
+        for (const username of users) {
+            const viewableDir = path.join(dataDir, username, 'viewable');
+            await fs.mkdir(viewableDir, { recursive: true });
+
+            const stegFilename = req.file.originalname;
+            const stegImagePath = path.join(viewableDir, stegFilename);
+            await fs.writeFile(stegImagePath, stegImageBuffer);
+
+            const metadataPath = path.join(viewableDir, `${stegFilename}.json`);
+            await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+
+            console.log(`📨 Steg image received for ${username} from ${metadata.from}`);
+            break;
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error('Receive steg image error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
 
 app.post('/api/reject', async (req, res) => {
     if (!req.session.username) {
