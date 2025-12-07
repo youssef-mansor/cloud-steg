@@ -60,12 +60,12 @@ async function findLeader() {
     return leader || serverEndpoints[0];
 }
 
-// Broadcast request to all servers, return first successful response
+// Broadcast request to all servers, return the best response (from leader)
 async function broadcastRequest(path, options = {}) {
     const promises = serverEndpoints.map(async (server) => {
         try {
             const url = `${server}${path}`;
-            const response = await axios({ url, ...options, timeout: 3000 });
+            const response = await axios({ url, ...options, timeout: 1500 });
             return response;
         } catch (e) {
             return null;
@@ -73,13 +73,23 @@ async function broadcastRequest(path, options = {}) {
     });
 
     const results = await Promise.all(promises);
-    const successResponse = results.find(r => r !== null);
+    const successResponses = results.filter(r => r !== null);
 
-    if (successResponse) {
-        return successResponse;
+    if (successResponses.length === 0) {
+        throw new Error('No server available');
     }
 
-    throw new Error('No server available');
+    // Prefer responses with data (from leader)
+    // Check if response has users array with data, or images array with data, etc.
+    const responseWithData = successResponses.find(r => {
+        const data = r.data;
+        return (data.users && data.users.length > 0) ||
+            (data.images && data.images.length > 0) ||
+            (data.online_clients && data.online_clients.length > 0);
+    });
+
+    // Return response with data, or first successful response as fallback
+    return responseWithData || successResponses[0];
 }
 
 async function ensureUserDirectory(username) {
