@@ -6,4 +6,9 @@
 *.swp
 
 credentials/service-account.json
-credentials/cloud-steg-a463f-firebase-adminsdk-fbsvc-484ddc44b2.json
+credentials/cloud-steg-a463f-firebase-adminsdk-fbsvc-484ddc44b2.json*.log
+my_config.toml
+user-ui/data/
+user-ui/node_modules/@img/
+user-ui/server.js.backup
+user-ui/view-image-endpoint.js
