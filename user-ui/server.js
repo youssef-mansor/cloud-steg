@@ -312,38 +312,35 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
         const thumbnailPath = path.join(userImagesDir, thumbnailFilename);
         await fs.writeFile(thumbnailPath, thumbnailBuffer);
 
-        // Upload thumbnail to server (Firebase now works)
-        try {
-            const FormData = require('form-data');
-            const formData = new FormData();
-            formData.append('image', thumbnailBuffer, {
-                filename: originalName,
-                contentType: 'image/png'
-            });
+        // Upload thumbnail to ALL servers (broadcast)
+        const uploadPromises = serverEndpoints.map(async (server) => {
+            try {
+                const FormData = require('form-data');
+                const formData = new FormData();
+                formData.append('image', thumbnailBuffer, {
+                    filename: originalName,
+                    contentType: 'image/png'
+                });
 
-            // Try uploading to each server directly
-            let uploadSuccess = false;
-            for (const server of serverEndpoints) {
-                try {
-                    const response = await axios.post(`${server}/upload_image/${username}`, formData, {
-                        headers: formData.getHeaders(),
-                        timeout: 30000
-                    });
-                    console.log(`✅ Thumbnail uploaded to ${server}`);
-                    uploadSuccess = true;
-                    break;
-                } catch (e) {
-                    console.log(`❌ Failed to upload to ${server}:`, e.message);
-                }
+                const response = await axios.post(`${server}/upload_image/${username}`, formData, {
+                    headers: formData.getHeaders(),
+                    timeout: 30000
+                });
+                console.log(`✅ Thumbnail uploaded to ${server}`);
+                return { server, success: true };
+            } catch (e) {
+                console.log(`❌ Failed to upload to ${server}:`, e.message);
+                return { server, success: false, error: e.message };
             }
+        });
 
-            if (uploadSuccess) {
-                console.log(`✅ Upload complete: original + thumbnail saved locally, thumbnail uploaded to server`);
-            } else {
-                console.warn('⚠️ Server upload failed on all servers, but local save succeeded');
-            }
-        } catch (e) {
-            console.warn('Server upload failed, but local save succeeded:', e.message);
+        const results = await Promise.all(uploadPromises);
+        const successCount = results.filter(r => r.success).length;
+
+        if (successCount > 0) {
+            console.log(`✅ Upload complete: thumbnail uploaded to ${successCount}/${serverEndpoints.length} servers`);
+        } else {
+            console.warn('⚠️ Server upload failed on all servers, but local save succeeded');
         }
 
         res.json({
