@@ -771,6 +771,54 @@ app.get('/api/requests', async (req, res) => {
     }
 });
 
+// P2P endpoint: update view count for local viewable image
+app.post('/update-local-view-count', async (req, res) => {
+    try {
+        const { image, viewCount } = req.body;
+
+        console.log(`🔄 [P2P UPDATE] Received request to update "${image}" to viewCount=${viewCount}`);
+
+        const dataDir = path.join(__dirname, 'data');
+        const users = await fs.readdir(dataDir).catch(() => []);
+
+        console.log(`🔍 [P2P UPDATE] Checking ${users.length} local users:`, users);
+
+        for (const username of users) {
+            const viewableDir = path.join(dataDir, username, 'viewable');
+            try {
+                const files = await fs.readdir(viewableDir);
+                console.log(`📂 [P2P UPDATE] User ${username} has ${files.length} viewable files`);
+
+                for (const file of files) {
+                    if (!file.endsWith('.json')) continue;
+
+                    const metadataPath = path.join(viewableDir, file);
+                    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+
+                    console.log(`🔍 [P2P UPDATE] Checking ${file}: originalImage="${metadata.originalImage}"`);
+
+                    // Match by originalImage field
+                    if (metadata.originalImage === image) {
+                        const oldCount = metadata.viewCount;
+                        metadata.viewCount = parseInt(viewCount);
+                        await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+                        console.log(`✅ [P2P UPDATE] SUCCESS! Updated ${file} from ${oldCount} to ${viewCount} for user ${username}`);
+                        return res.json({ success: true });
+                    }
+                }
+            } catch (e) {
+                console.log(`⚠️  [P2P UPDATE] Error checking user ${username}:`, e.message);
+            }
+        }
+
+        console.warn(`❌ [P2P UPDATE] Image "${image}" NOT FOUND in any viewable folder`);
+        res.status(404).json({ error: 'Image not found' });
+    } catch (e) {
+        console.error('❌ [P2P UPDATE] Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
     if (!req.session.username) {
         return res.status(401).json({ error: 'Not logged in' });
