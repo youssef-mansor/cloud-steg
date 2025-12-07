@@ -424,6 +424,31 @@ app.get('/api/image/:username/:filename', async (req, res) => {
     }
 });
 
+// P2P endpoint: serve local thumbnails to other devices
+app.get('/p2p-images', async (req, res) => {
+    try {
+        // Find local users and return their thumbnails
+        const dataDir = path.join(__dirname, 'data');
+        const users = await fs.readdir(dataDir).catch(() => []);
+
+        let allThumbnails = [];
+        for (const username of users) {
+            const userImagesDir = path.join(dataDir, username, 'images');
+            try {
+                const files = await fs.readdir(userImagesDir);
+                const thumbnails = files.filter(f => f.includes('-thumb-') && f.match(/\.(png|jpg|jpeg|webp)$/i));
+                allThumbnails = allThumbnails.concat(thumbnails);
+            } catch (e) {
+                // Skip if no images folder
+            }
+        }
+
+        res.json({ images: allThumbnails, count: allThumbnails.length });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ============== Discovery Endpoints ==============
 
 app.get('/api/discover', async (req, res) => {
