@@ -27,7 +27,7 @@ election_timeout_min_ms = 9000
 election_timeout_max_ms = 15000
 
 # Duration of a leader term in milliseconds (default 2 minutes = 120,000)
-leader_term_ms = 30000
+leader_term_ms = 120000
 
 # Timeout for network operations (milliseconds)
 net_timeout_ms = 1000
