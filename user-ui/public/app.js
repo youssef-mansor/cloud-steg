@@ -182,12 +182,15 @@ async function loadMyImages() {
     try {
         const data = await apiCall('/api/my-images');
 
-        if (data.count === 0) {
-            myImagesGrid.innerHTML = '<p class="empty-state">No images yet. Upload your first 128×128 image!</p>';
+        // Only show local originals (not thumbnails from server)
+        const images = data.local_images || [];
+
+        if (images.length === 0) {
+            myImagesGrid.innerHTML = '<p class="empty-state">No images yet. Upload your first image!</p>';
             return;
         }
 
-        myImagesGrid.innerHTML = data.images.map(filename => `
+        myImagesGrid.innerHTML = images.map(filename => `
       <div class="image-card" onclick="viewImage('${currentUser}', '${filename}')">
         <img src="/api/image/${currentUser}/${filename}" alt="${filename}" />
         <div class="image-card-info">
@@ -251,8 +254,14 @@ async function loadOnlineUsers() {
             return;
         }
 
+        // Remember which users were expanded
+        const expandedUsers = new Set();
+        document.querySelectorAll('.user-item.expanded').forEach(item => {
+            expandedUsers.add(item.id.replace('user-', ''));
+        });
+
         usersList.innerHTML = data.online_clients.map(user => `
-      <div class="user-item" id="user-${user.username}">
+      <div class="user-item ${expandedUsers.has(user.username) ? 'expanded' : ''}" id="user-${user.username}">
         <div class="user-header" onclick="toggleUser('${user.username}')">
           <div class="user-info">
             <div class="user-avatar">${user.username[0].toUpperCase()}</div>
@@ -271,23 +280,22 @@ async function loadOnlineUsers() {
       </div>
     `).join('');
 
+        // Reload images for expanded users
+        expandedUsers.forEach(username => {
+            if (data.online_clients.find(u => u.username === username)) {
+                loadUserImages(username);
+            }
+        });
+
     } catch (e) {
         usersList.innerHTML = '<p class="empty-state">Failed to load users</p>';
     }
 }
 
-async function toggleUser(username) {
-    const userItem = document.getElementById(`user-${username}`);
+async function loadUserImages(username) {
     const imagesContainer = document.getElementById(`images-${username}`);
+    if (!imagesContainer) return;
 
-    if (userItem.classList.contains('expanded')) {
-        userItem.classList.remove('expanded');
-        return;
-    }
-
-    userItem.classList.add('expanded');
-
-    // Load user's images
     try {
         const data = await apiCall(`/api/user-images/${username}`);
 
@@ -308,17 +316,53 @@ async function toggleUser(username) {
         `).join('')}
       </div>
     `;
-
     } catch (e) {
         imagesContainer.innerHTML = '<p class="empty-state">Failed to load images</p>';
     }
 }
 
+async function toggleUser(username) {
+    const userItem = document.getElementById(`user-${username}`);
+    const imagesContainer = document.getElementById(`images-${username}`);
+
+    if (userItem.classList.contains('expanded')) {
+        userItem.classList.remove('expanded');
+        return;
+    }
+
+    userItem.classList.add('expanded');
+    loadUserImages(username);
+}
+
+function expandAllUsers() {
+    const userItems = document.querySelectorAll('.user-item');
+    userItems.forEach(async (item) => {
+        if (!item.classList.contains('expanded')) {
+            const username = item.id.replace('user-', '');
+            await toggleUser(username);
+        }
+    });
+}
+
+function collapseAllUsers() {
+    const userItems = document.querySelectorAll('.user-item');
+    userItems.forEach(item => {
+        item.classList.remove('expanded');
+    });
+}
+
 // ============== Request Access ==============
 
 function requestImageAccess(username, filename) {
+    // Convert thumbnail filename to original filename for approval
+    // thumbnail: 123-thumb-file.png -> original: 123-original-file.png
+    const originalFilename = filename.replace('-thumb-', '-original-').replace(/\.png$/, function (match) {
+        // If it was already .png, keep it, otherwise the original might have different extension
+        return match;
+    });
+
     requestUsername.textContent = username;
-    requestImageName.textContent = filename;
+    requestImageName.textContent = originalFilename;
     requestModal.classList.remove('hidden');
 }
 
@@ -349,9 +393,11 @@ async function loadRequests() {
         if (data.requests.length === 0) {
             requestsList.innerHTML = '<p class="empty-state">No pending requests</p>';
             document.getElementById('requestCount').textContent = '0';
+            window.currentRequests = [];
             return;
         }
 
+        window.currentRequests = data.requests;
         document.getElementById('requestCount').textContent = data.requests.length;
 
         requestsList.innerHTML = data.requests.map((req, idx) => `
@@ -373,17 +419,49 @@ async function loadRequests() {
 }
 
 function approveRequest(idx) {
-    // TODO: Load request data
-    approveUsername.textContent = 'user'; // Replace with actual
-    approveImageName.textContent = 'image.png'; // Replace with actual
+    const requests = window.currentRequests || [];
+    const request = requests[idx];
+
+    if (!request) {
+        alert('Request not found');
+        return;
+    }
+
+    approveUsername.textContent = request.from;
+    approveImageName.textContent = request.image;
+    approveModal.dataset.requestId = request.id;
     approveModal.classList.remove('hidden');
 }
 
-function rejectRequest(idx) {
-    if (confirm('Reject this request?')) {
-        // TODO: Implement rejection
-        alert('Request rejected');
+async function rejectRequest(idx) {
+    if (!confirm('Reject this request?')) {
+        return;
+    }
+
+    const requests = window.currentRequests || [];
+    const request = requests[idx];
+
+    if (!request) {
+        alert('Request not found');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId: request.id })
+        });
+
+        if (!response.ok) {
+            throw new Error('Rejection failed');
+        }
+
+        alert('✅ Request rejected');
         loadRequests();
+
+    } catch (e) {
+        alert(`❌ Failed to reject: ${e.message}`);
     }
 }
 
@@ -395,11 +473,44 @@ async function approveWithCover() {
     }
 
     const viewCount = viewCountInput.value;
+    if (!viewCount || viewCount < 1) {
+        alert('Please enter a valid view count');
+        return;
+    }
 
-    // TODO: Implement steganography
-    alert('✅ Approval sent (steganography not yet implemented)');
-    approveModal.classList.add('hidden');
-    loadRequests();
+    // Get the request ID and details from the modal
+    const requestId = approveModal.dataset.requestId;
+
+    if (!requestId) {
+        alert('No request selected');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('requestId', requestId);
+        formData.append('viewCount', viewCount);
+        formData.append('coverImage', coverFile);
+
+        const response = await fetch('/api/approve', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Approval failed');
+        }
+
+        const data = await response.json();
+        alert(`✅ ${data.message}`);
+
+        approveModal.classList.add('hidden');
+        loadRequests();
+
+    } catch (e) {
+        alert(`❌ Approval failed: ${e.message}`);
+    }
 }
 
 // ============== Viewable Images Tab ==============
@@ -411,17 +522,19 @@ async function loadViewableImages() {
         if (data.images.length === 0) {
             viewableList.innerHTML = '<p class="empty-state">No shared images yet</p>';
             document.getElementById('viewableCount').textContent = '0';
+            window.viewableImages = [];
             return;
         }
 
+        window.viewableImages = data.images;
         document.getElementById('viewableCount').textContent = data.images.length;
 
         viewableList.innerHTML = data.images.map((img, idx) => `
       <div class="viewable-card">
         <div class="viewable-info">
-          <h3>${img.image}</h3>
+          <h3>${img.originalImage}</h3>
           <p>From: ${img.from}</p>
-          <p>Views remaining: <span class="view-count">${img.views}</span></p>
+          <p>Views remaining: <span class="view-count">${img.viewCount}</span></p>
         </div>
         <button class="btn-primary" onclick="viewStegImage(${idx})">VIEW</button>
       </div>
@@ -432,9 +545,42 @@ async function loadViewableImages() {
     }
 }
 
-function viewStegImage(idx) {
-    // TODO: Implement steganography extraction
-    alert('Steganography extraction not yet implemented');
+async function viewStegImage(idx) {
+    const images = window.viewableImages || [];
+    const image = images[idx];
+
+    if (!image) {
+        alert('Image not found');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/view-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: image.filename })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to decrypt image');
+        }
+
+        const imageBlob = await response.blob();
+        const imageUrl = URL.createObjectURL(imageBlob);
+
+        // Display in modal
+        modalImage.src = imageUrl;
+        modalTitle.textContent = `From: ${image.from}`;
+        modalDetails.textContent = `Original: ${image.originalImage} | Views left: ${image.viewCount - 1}`;
+        imageModal.classList.remove('hidden');
+
+        // Reload viewable list to update count
+        setTimeout(() => loadViewableImages(), 1000);
+
+    } catch (e) {
+        alert(`❌ Failed to view image: ${e.message}`);
+    }
 }
 
 // ============== Image Viewer ==============
@@ -464,7 +610,12 @@ tabBtns.forEach(btn => {
 
 imageUpload.addEventListener('change', uploadImage);
 
+const expandAllBtn = document.getElementById('expandAllBtn');
+const collapseAllBtn = document.getElementById('collapseAllBtn');
+
 refreshUsersBtn.addEventListener('click', loadOnlineUsers);
+expandAllBtn.addEventListener('click', expandAllUsers);
+collapseAllBtn.addEventListener('click', collapseAllUsers);
 refreshRequestsBtn.addEventListener('click', loadRequests);
 refreshViewableBtn.addEventListener('click', loadViewableImages);
 
@@ -488,5 +639,25 @@ document.querySelectorAll('.modal-close').forEach(btn => {
 });
 
 // ============== Initialize ==============
+
+// Auto-refresh tabs every second when logged in (except browse tab)
+setInterval(() => {
+    if (!currentUser) return;
+
+    switch (currentTab) {
+        case 'myImages':
+            loadMyImages();
+            break;
+        case 'browse':
+            // Don't auto-refresh browse tab - use manual refresh button only
+            break;
+        case 'requests':
+            loadRequests();
+            break;
+        case 'viewable':
+            loadViewableImages();
+            break;
+    }
+}, 1000);
 
 console.log('🚀 Cloud Steg User Dashboard loaded');
