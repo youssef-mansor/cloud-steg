@@ -5,9 +5,24 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
+const os = require('os');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Helper function to get the device's local IP address
+function getLocalIPAddress() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            // Skip internal (loopback) and non-IPv4 addresses
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return '127.0.0.1'; // Fallback to localhost if no network interface found
+}
 
 // Server endpoints (active servers in cluster)
 const serverEndpoints = process.env.SERVER_ENDPOINTS
@@ -144,7 +159,7 @@ function stopHeartbeat(username) {
 
 // ============== Registration ==============
 
-const CLIENT_IP = process.env.CLIENT_IP || '10.40.48.133';
+const CLIENT_IP = process.env.CLIENT_IP || getLocalIPAddress();
 const CLIENT_PORT = parseInt(process.env.PORT) || 8000;
 
 app.post('/api/register', async (req, res) => {
@@ -1189,6 +1204,7 @@ app.post('/api/view-image', async (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`🚀 User Dashboard running at http://localhost:${PORT}`);
+    console.log(`🌐 Device IP: ${CLIENT_IP}:${CLIENT_PORT} (users will register with this address)`);
     console.log(`📡 Monitoring servers: ${serverEndpoints.join(', ')}`);
 });
 
