@@ -420,17 +420,20 @@ async function loadRequests() {
 }
 
 function approveRequest(idx) {
-    const requests = window.currentRequests || [];
-    const request = requests[idx];
-
-    if (!request) {
+    const req = window.currentRequests[idx];
+    if (!req) {
         alert('Request not found');
         return;
     }
 
-    approveUsername.textContent = request.from;
-    approveImageName.textContent = request.image;
-    approveModal.dataset.requestId = request.id;
+    approveImageName.textContent = req.image;
+    approveUsername.textContent = req.from;
+    viewCountInput.value = 5;
+    coverImageInput.value = '';
+
+    approveModal.dataset.requestId = `${Date.now()}-${req.from}.json`;
+    approveModal.dataset.image = req.image;  // Store for recordApproval
+    approveModal.dataset.requester = req.from;  // Store for recordApproval
     approveModal.classList.remove('hidden');
 }
 
@@ -506,9 +509,10 @@ async function approveWithCover() {
         const data = await response.json();
         alert(`✅ ${data.message}`);
 
-        // Record approval for later editing
-        const req = window.currentRequests[parseInt(approveModal.dataset.requestId)];
-        recordApproval(req.from, req.image, parseInt(viewCountInput.value));
+        // Record approval for later editing (use modal data, not currentRequests which is cleared)
+        const approvedImage = approveModal.dataset.image;
+        const approvedRecipient = approveModal.dataset.requester;
+        recordApproval(approvedRecipient, approvedImage, parseInt(viewCountInput.value));
 
         approveModal.classList.add('hidden');
         loadRequests();
