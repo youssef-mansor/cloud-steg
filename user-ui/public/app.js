@@ -505,8 +505,13 @@ async function approveWithCover() {
         const data = await response.json();
         alert(`✅ ${data.message}`);
 
+        // Record approval for later editing
+        const req = window.currentRequests[parseInt(approveModal.dataset.requestId)];
+        recordApproval(req.from, req.image, parseInt(viewCountInput.value));
+
         approveModal.classList.add('hidden');
         loadRequests();
+        displayApprovedRequests(); // Refresh approved list
 
     } catch (e) {
         alert(`❌ Approval failed: ${e.message}`);
@@ -618,15 +623,22 @@ expandAllBtn.addEventListener('click', expandAllUsers);
 collapseAllBtn.addEventListener('click', collapseAllUsers);
 refreshRequestsBtn.addEventListener('click', loadRequests);
 refreshViewableBtn.addEventListener('click', loadViewableImages);
+document.getElementById('refreshApprovedBtn').addEventListener('click', displayApprovedRequests);
+document.getElementById('updateViewCountBtn').addEventListener('click', updateViewCount);
 
 sendRequestBtn.addEventListener('click', sendViewRequest);
 approveBtn.addEventListener('click', approveWithCover);
 
 // Modal close buttons
-document.querySelectorAll('.modal-close').forEach(btn => {
-    btn.addEventListener('click', () => {
-        btn.closest('.modal').classList.add('hidden');
+btn.closest('.modal').classList.add('hidden');
     });
+});
+
+// Add modal close handlers for editViewCountModal
+document.getElementById('editViewCountModal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('editViewCountModal') || e.target.classList.contains('modal-close')) {
+        document.getElementById('editViewCountModal').classList.add('hidden');
+    }
 });
 
 // Close modals on outside click
@@ -661,3 +673,113 @@ setInterval(() => {
 }, 1000);
 
 console.log('🚀 Cloud Steg User Dashboard loaded');
+// Track approved requests (stored when approving)
+let approvedRequests = [];
+
+// Load approved requests from localStorage
+function loadApprovedRequests() {
+    const stored = localStorage.getItem('approvedRequests');
+    return stored ? JSON.parse(stored) : [];
+}
+
+// Save approved requests to localStorage
+function saveApprovedRequests(requests) {
+    localStorage.setItem('approvedRequests', JSON.stringify(requests));
+}
+
+// Display approved requests
+async function displayApprovedRequests() {
+    const approvedList = document.getElementById('approvedList');
+    approvedRequests = loadApprovedRequests();
+
+    if (!approvedRequests || approvedRequests.length === 0) {
+        approvedList.innerHTML = '<p class="empty-state">No approved requests</p>';
+        return;
+    }
+
+    let html = '';
+    for (const req of approvedRequests) {
+        html += `
+            <div class="request-item">
+                <div class="request-info">
+                    <p><strong>Image:</strong> ${req.image}</p>
+                    <p><strong>Recipient:</strong> ${req.recipient}</p>
+                    <p><strong>View Count:</strong> ${req.viewCount}</p>
+                    <p><strong>Approved:</strong> ${new Date(req.timestamp).toLocaleString()}</p>
+                </div>
+                <div class="request-actions">
+                    <button class="btn-secondary" onclick="editViewCount('${req.recipient}', '${req.image}', ${req.viewCount})">
+                        ✏️ Edit View Count
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    approvedList.innerHTML = html;
+}
+
+// Edit view count for an approved request
+function editViewCount(recipient, image, currentCount) {
+    document.getElementById('editImageName').textContent = image;
+    document.getElementById('editRecipient').textContent = recipient;
+    document.getElementById('newViewCountInput').value = currentCount;
+
+    const modal = document.getElementById('editViewCountModal');
+    modal.classList.remove('hidden');
+
+    // Store for update handler
+    modal.dataset.recipient = recipient;
+    modal.dataset.image = image;
+}
+
+// Update view count for a recipient
+async function updateViewCount() {
+    const modal = document.getElementById('editViewCountModal');
+    const recipient = modal.dataset.recipient;
+    const image = modal.dataset.image;
+    const newCount = parseInt(document.getElementById('newViewCountInput').value);
+
+    if (!newCount || newCount < 1) {
+        alert('Please enter a valid view count');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/update-view-count', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipient, image, viewCount: newCount })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(data.error || 'Failed to update view count');
+
+        // Update local storage
+        approvedRequests = approvedRequests.map(req => {
+            if (req.recipient === recipient && req.image === image) {
+                return { ...req, viewCount: newCount };
+            }
+            return req;
+        });
+        saveApprovedRequests(approvedRequests);
+
+        alert(`✅ View count updated successfully!`);
+        modal.classList.add('hidden');
+        displayApprovedRequests();
+    } catch (e) {
+        alert(`❌ Failed to update: ${e.message}`);
+    }
+}
+
+// Call this after approval
+function recordApproval(recipient, image, viewCount) {
+    approvedRequests = loadApprovedRequests();
+    approvedRequests.push({
+        recipient,
+        image,
+        viewCount,
+        timestamp: Date.now()
+    });
+    saveApprovedRequests(approvedRequests);
+}

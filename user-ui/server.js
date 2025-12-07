@@ -680,12 +680,72 @@ app.post('/receive-request', async (req, res) => {
 
         const requestFile = path.join(requestsDir, `${timestamp}-${from}.json`);
         await fs.writeFile(requestFile, JSON.stringify({ from, image, timestamp }, null, 2));
-
         console.log(`📨 Request received for ${to} from ${from}`);
 
         res.json({ success: true });
     } catch (e) {
-        console.error('Receive request error:', e);
+        console.error('Rejection error:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update view count for an approved image
+app.post('/api/update-view-count', async (req, res) => {
+    if (!req.session.username) {
+        return res.status(401).json({ error: 'Not logged in' });
+    }
+
+    try {
+        const { recipient, image, viewCount } = req.body;
+        const sender = req.session.username;
+
+        if (!recipient || !image || !viewCount) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        console.log(`🔄 Updating view count for ${image} (${recipient}) to ${viewCount}`);
+
+        // Try to update via P2P first
+        const usersResponse = await broadcastRequest('/users', { method: 'GET' });
+        const recipientUser = usersResponse.data.users.find(u => u.username === recipient);
+
+        let p2pSuccess = false;
+        if (recipientUser) {
+            const recipientURL = `http://${recipientUser.addr}`;
+            try {
+                await axios.post(`${recipientURL}/update-local-view-count`, {
+                    image,
+                    viewCount
+                }, { timeout: 5000 });
+                console.log(`✅ View count updated via P2P at ${recipientURL}`);
+                p2pSuccess = true;
+            } catch (e) {
+                console.log(`P2P update failed: ${e.message}`);
+            }
+        }
+
+        // Fallback to cluster if P2P failed
+        if (!p2pSuccess) {
+            try {
+                await broadcastRequest('/add_note', {
+                    method: 'POST',
+                    data: {
+                        target_username: recipient,
+                        target_image: image,
+                        view_count_edit: parseInt(viewCount)
+                    }
+                });
+                console.log(`📝 View count update stored in cluster for ${recipient}`);
+            } catch (clusterErr) {
+                console.warn(`Failed to store in cluster:`, clusterErr.message);
+                return res.status(500).json({ error: 'Update failed' });
+            }
+        }
+
+        res.json({ success: true, message: 'View count updated' });
+
+    } catch (e) {
+        console.error('Update view count error:', e.message);
         res.status(500).json({ error: e.message });
     }
 });

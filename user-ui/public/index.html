@@ -80,15 +80,19 @@
             </section>
 
             <!-- Tab 3: Requests -->
-            <section id="requestsTab" class="tab-pane">
+            <div id="requestsTab" class="tab-content">
                 <div class="tab-header">
-                    <h2>Incoming Requests</h2>
-                    <button id="refreshRequestsBtn" class="btn-secondary">🔄 Refresh</button>
+                    <h2>📬 Image Access Requests</h2>
+                    <button id="refreshRequestsBtn" class="btn-secondary">Refresh</button>
                 </div>
-                <div id="requestsList" class="requests-list">
-                    <p class="empty-state">No pending requests</p>
+                <div id="requestsList" class="requests-list">Loading...</div>
+
+                <div class="tab-header" style="margin-top: 2rem;">
+                    <h2>✅ Approved Requests (Sent by You)</h2>
+                    <button id="refreshApprovedBtn" class="btn-secondary">Refresh</button>
                 </div>
-            </section>
+                <div id="approvedList" class="requests-list">Loading...</div>
+            </div>
 
             <!-- Tab 4: View Images -->
             <section id="viewableTab" class="tab-pane">
@@ -146,6 +150,22 @@
                     <label for="coverImageInput" class="btn-secondary">Choose Cover</label>
                 </label>
                 <button id="approveBtn" class="btn-primary">Approve & Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit View Count Modal -->
+    <div id="editViewCountModal" class="modal hidden">
+        <div class="modal-content">
+            <button class="modal-close">&times;</button>
+            <h2>Edit View Count</h2>
+            <div class="modal-form">
+                <label>Image: <span id="editImageName"></span></label>
+                <label>Recipient: <span id="editRecipient"></span></label>
+                <label>New View Count:
+                    <input type="number" id="newViewCountInput" min="1" value="5" />
+                </label>
+                <button id="updateViewCountBtn" class="btn-primary">Update</button>
             </div>
         </div>
     </div>

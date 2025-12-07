@@ -29,22 +29,14 @@ function encryptData(imageBuffer, metadata, key) {
  * Decrypt data to get image and metadata
  */
 function decryptData(encryptedData, key) {
-    try {
-        const decrypted = CryptoJS.AES.decrypt(encryptedData, key);
-        const jsonData = decrypted.toString(CryptoJS.enc.Utf8);
+    const decrypted = CryptoJS.AES.decrypt(encryptedData, key);
+    const jsonData = decrypted.toString(CryptoJS.enc.Utf8);
+    const data = JSON.parse(jsonData);
 
-        if (!jsonData) throw new Error('Decryption failed (empty result)');
-
-        const data = JSON.parse(jsonData);
-
-        return {
-            imageBuffer: Buffer.from(data.image, 'base64'),
-            metadata: data.metadata
-        };
-    } catch (e) {
-        console.error("Decryption failed:", e.message);
-        throw new Error('Failed to decrypt image. Wrong recipient or password?');
-    }
+    return {
+        imageBuffer: Buffer.from(data.image, 'base64'),
+        metadata: data.metadata
+    };
 }
 
 /**
@@ -122,34 +114,27 @@ async function extractDataFromImage(stegImagePath) {
 }
 
 /**
- * Convert string to binary string (UTF-8 safe)
+ * Convert string to binary string
  */
 function stringToBinary(str) {
-    // UTF-8 encode first
-    const utf8Bytes = unescape(encodeURIComponent(str));
     let binary = '';
-    for (let i = 0; i < utf8Bytes.length; i++) {
-        const charCode = utf8Bytes.charCodeAt(i);
+    for (let i = 0; i < str.length; i++) {
+        const charCode = str.charCodeAt(i);
         binary += charCode.toString(2).padStart(8, '0');
     }
     return binary;
 }
 
 /**
- * Convert binary string to string (UTF-8 safe)
+ * Convert binary string to string
  */
 function binaryToString(binary) {
-    let bytes = '';
+    let str = '';
     for (let i = 0; i < binary.length; i += 8) {
         const byte = binary.substr(i, 8);
-        bytes += String.fromCharCode(parseInt(byte, 2));
+        str += String.fromCharCode(parseInt(byte, 2));
     }
-    // UTF-8 decode
-    try {
-        return decodeURIComponent(escape(bytes));
-    } catch (e) {
-        return bytes; // Fallback
-    }
+    return str;
 }
 
 module.exports = {
