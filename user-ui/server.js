@@ -405,19 +405,41 @@ app.get('/api/image/:username/:filename', async (req, res) => {
             // Not found locally
         }
 
-        // Fallback to server if local not found
+        // P2P: Fetch from owner's device
         try {
-            const response = await broadcastRequest(`/image/${username}/${filename}`, {
-                method: 'GET',
-                responseType: 'arraybuffer'
-            });
+            const usersResponse = await broadcastRequest('/users', { method: 'GET' });
+            const ownerUser = usersResponse.data.users.find(u => u.username === username);
 
-            res.set('Content-Type', 'image/png');
-            res.send(Buffer.from(response.data));
+            if (ownerUser) {
+                const ownerURL = `http://${ownerUser.addr}`;
+                console.log(`📡 Fetching ${filename} from ${username}'s device at ${ownerURL}`);
+
+                const response = await axios.get(`${ownerURL}/p2p-image/${filename}`, {
+                    responseType: 'arraybuffer',
+                    timeout: 5000
+                });
+
+                res.set('Content-Type', response.headers['content-type'] || 'image/png');
+                return res.send(response.data);
+            }
         } catch (e) {
-            res.status(404).json({ error: 'Image not found' });
+            console.log(`P2P image fetch failed:`, e.message);
         }
 
+        // Last resort: try server
+        try {
+            const serverUrl = `${serverEndpoints[0]}/image/${username}/${filename}`;
+            const response = await axios.get(serverUrl, {
+                responseType: 'arraybuffer',
+                timeout: 5000
+            });
+            res.set('Content-Type', response.headers['content-type'] || 'image/png');
+            return res.send(response.data);
+        } catch (e) {
+            // Server also failed
+        }
+
+        res.status(404).json({ error: 'Image not found' });
     } catch (e) {
         console.error('Image serve error:', e.message);
         res.status(404).json({ error: 'Image not found' });
@@ -444,6 +466,31 @@ app.get('/p2p-images', async (req, res) => {
         }
 
         res.json({ images: allThumbnails, count: allThumbnails.length });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// P2P endpoint: serve individual image file
+app.get('/p2p-image/:filename', async (req, res) => {
+    try {
+        const { filename } = req.params;
+
+        // Find the image in any local user's folder
+        const dataDir = path.join(__dirname, 'data');
+        const users = await fs.readdir(dataDir).catch(() => []);
+
+        for (const username of users) {
+            const imagePath = path.join(dataDir, username, 'images', filename);
+            try {
+                await fs.access(imagePath);
+                return res.sendFile(imagePath);
+            } catch (e) {
+                // Try next user
+            }
+        }
+
+        res.status(404).json({ error: 'Image not found' });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
