@@ -327,7 +327,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
                 try {
                     const response = await axios.post(`${server}/upload_image/${username}`, formData, {
                         headers: formData.getHeaders(),
-                        timeout: 10000
+                        timeout: 30000  // Increased to 30 seconds for slow uploads
                     });
                     console.log(`✅ Thumbnail uploaded to ${server}`);
                     uploadSuccess = true;
