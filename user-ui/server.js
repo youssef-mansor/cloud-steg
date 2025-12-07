@@ -994,52 +994,39 @@ app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => 
             : req.body.metadata;
         const stegImageBuffer = req.file.buffer;
 
-        // The recipient is the one who REQUESTED the image (opposite of metadata.from which is the approver)
-        // In the approval flow: approver sends to requester
-        // So we need to find who this steg image is FOR based on the cluster registration
+        if (!metadata || !metadata.to) {
+            return res.status(400).json({ error: 'Invalid metadata: missing recipient (to field)' });
+        }
 
-        // Since we know metadata.from is the approver, we need to determine the requester
-        // The best way is to check which local user exists, or use a 'to' field
-
-        // For now, save to first local user (the owner of this UI instance)
+        // Use the 'to' field from metadata - this is the actual intended recipient
+        // ALWAYS create directory for this user, even if they haven't logged in yet
+        const recipientUsername = metadata.to;
         const dataDir = path.join(__dirname, 'data');
-        const users = await fs.readdir(dataDir).catch(() => []);
+        
+        // Ensure recipient user directory exists (create if needed)
+        const userDir = path.join(dataDir, recipientUsername);
+        const viewableDir = path.join(userDir, 'viewable');
 
-        if (users.length === 0) {
-            console.error('No users found on this device');
-            return res.status(404).json({ error: 'No users on this device' });
+        try {
+            await fs.mkdir(viewableDir, { recursive: true });
+        } catch (mkdirErr) {
+            console.error(`Failed to create directory for ${recipientUsername}:`, mkdirErr.message);
+            return res.status(500).json({ error: 'Failed to create storage directory' });
         }
-
-        // Save to the correct recipient user (from metadata.to field)
-        let recipientUsername = null;
-
-        // Check if metadata has 'to' field
-        if (metadata.to) {
-            // Check if this user exists on this device
-            if (users.includes(metadata.to)) {
-                recipientUsername = metadata.to;
-            }
-        }
-
-        // Fallback to first user if recipient not found
-        if (!recipientUsername) {
-            recipientUsername = users[0];
-            console.warn(`Recipient '${metadata.to}' not found on this device, saving to first user: ${recipientUsername}`);
-        }
-
-        const viewableDir = path.join(dataDir, recipientUsername, 'viewable');
-        await fs.mkdir(viewableDir, { recursive: true });
 
         const stegFilename = req.file.originalname;
         const stegImagePath = path.join(viewableDir, stegFilename);
-        await fs.writeFile(stegImagePath, stegImageBuffer);
-
         const metadataPath = path.join(viewableDir, `${stegFilename}.json`);
-        await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 
-        console.log(`📨 Steg image received for ${recipientUsername} from ${metadata.from}`);
-
-        res.json({ success: true });
+        try {
+            await fs.writeFile(stegImagePath, stegImageBuffer);
+            await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+            console.log(`📨 Steg image successfully received for ${recipientUsername} from ${metadata.from}`);
+            res.json({ success: true, recipient: recipientUsername });
+        } catch (writeErr) {
+            console.error(`Failed to write steg image for ${recipientUsername}:`, writeErr.message);
+            return res.status(500).json({ error: 'Failed to write steg image' });
+        }
     } catch (e) {
         console.error('Receive steg image error:', e);
         res.status(500).json({ error: e.message });
