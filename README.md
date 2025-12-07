@@ -120,7 +120,7 @@ election_retry_ms = 100
 
 ```bash
 source define-variables.sh
-cargo run -- --config config.toml --this-node 127.0.0.1:8080
+cargo run -- --config config.toml --bin dist_leader --this-node 10.40.45.27:5000
 ```
 
 **Terminal 2 - Node 2 (Port 8081, API:3001):**
@@ -128,7 +128,7 @@ cargo run -- --config config.toml --this-node 127.0.0.1:8080
 ```bash
 source define-variables.sh
 export API_PORT=3001
-cargo run -- --config config.toml --this-node 127.0.0.1:8081
+cargo run -- --config config.toml --bin dist_leader --this-node 10.40.36.216:5000
 ```
 
 **Terminal 3 - Node 3 (Port 8082, API:3002):**
@@ -136,7 +136,7 @@ cargo run -- --config config.toml --this-node 127.0.0.1:8081
 ```bash
 source define-variables.sh
 export API_PORT=3002
-cargo run -- --config config.toml --this-node 127.0.0.1:8082
+cargo run -- --config config.toml --bin dist_leader --this-node 10.40.54.163:5000
 ```
 
 **Expected Output:**
