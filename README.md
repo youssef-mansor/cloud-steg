@@ -4,21 +4,21 @@
 cargo run -- --config config.toml --this-node <ip>:<port>
 
 peers = [
+ "10.40.45.27:5000",
+ "10.40.36.216:5000",
  "10.40.54.163:5000",
- "10.40.51.185:5000",
- "10.40.44.249:5000",
 ]
 
 
 **NEW**
 # Terminal 1 - Node 1 (also runs HTTP API on port 3000)
-SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA REGISTERED_USERS_FOLDER_ID=1P5o3QM-PicdKdYNQM9YRqaNje4fv6QNk API_PORT=3000 cargo run -- --config config.toml --this-node 10.40.44.249:8080
+SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA REGISTERED_USERS_FOLDER_ID=1P5o3QM-PicdKdYNQM9YRqaNje4fv6QNk API_PORT=3000 cargo run -- --config config.toml --this-node 10.40.45.27:5000
 
 # Terminal 2 - Node 2 (HTTP API on port 3001)
-SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3001 cargo run -- --config config.toml --this-node 10.40.51.185:8081
+SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3001 cargo run -- --config config.toml --this-node 10.40.36.216:5000
 
 # Terminal 3 - Node 3 (HTTP API on port 3002)
-SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3002 cargo run -- --config config.toml --this-node 127.0.0.1:8082
+SHARED_DRIVE_ID=0AEwep46IAWKDUk9PVA API_PORT=3002 cargo run -- --config config.toml --this-node 10.40.54.163:5000
 
 
 **Register Service**
@@ -28,7 +28,7 @@ curl -X POST http://10.40.6.26:3000/register \
 
 
 **Heartbeat Test**
-curl http://10.40.44.249:3000/
+curl http://10.40.45.27:3000/
 
 # Cloud Steganography - Distributed Image Sharing System
 
