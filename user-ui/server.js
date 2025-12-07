@@ -13,15 +13,34 @@ const PORT = process.env.PORT || 5000;
 // Helper function to get the device's local IP address
 function getLocalIPAddress() {
     const interfaces = os.networkInterfaces();
+    const addresses = [];
+    
     for (const name of Object.keys(interfaces)) {
         for (const iface of interfaces[name]) {
             // Skip internal (loopback) and non-IPv4 addresses
             if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.address;
+                addresses.push({ name, address: iface.address });
             }
         }
     }
-    return '127.0.0.1'; // Fallback to localhost if no network interface found
+    
+    if (addresses.length === 0) {
+        console.warn('⚠️ No network interfaces found, using localhost');
+        return '127.0.0.1';
+    }
+    
+    // Log all available addresses
+    console.log('📍 Available network interfaces:');
+    addresses.forEach(({ name, address }) => {
+        console.log(`   - ${name}: ${address}`);
+    });
+    
+    // Prefer en0 (WiFi) or en1 (Ethernet) over other interfaces
+    const preferred = addresses.find(a => a.name === 'en0' || a.name === 'en1');
+    const selected = preferred || addresses[0];
+    
+    console.log(`✅ Selected interface: ${selected.name} (${selected.address})`);
+    return selected.address;
 }
 
 // Server endpoints (active servers in cluster)
@@ -159,6 +178,8 @@ function stopHeartbeat(username) {
 
 // ============== Registration ==============
 
+// CLIENT_IP can be manually set via environment variable if auto-detection fails
+// Example: CLIENT_IP=10.40.53.194 PORT=8000 node server.js
 const CLIENT_IP = process.env.CLIENT_IP || getLocalIPAddress();
 const CLIENT_PORT = parseInt(process.env.PORT) || 8000;
 
