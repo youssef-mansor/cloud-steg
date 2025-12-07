@@ -707,31 +707,47 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
 
         const stegImageBuffer = await steg.embedDataInImage(coverTempPath, encryptedData);
 
-        // PULL MODEL: Save steg image locally on approver's device
-        // The requester will fetch it via P2P when they check their "Viewable" tab
+        const stegFilename = `steg-${Date.now()}.png`;
 
-        const servedStegDir = path.join(__dirname, 'data', approver, 'served-steg');
-        await fs.mkdir(servedStegDir, { recursive: true });
+        // Get requester's address and send steg image to their UI
+        const usersResponse = await broadcastRequest('/users', { method: 'GET' });
+        const requesterUser = usersResponse.data.users.find(u => u.username === requester);
 
-        // Save using a name that identifies the recipient: recipient-timestamp.png
-        const stegFilename = `${requester}-${Date.now()}.png`;
-        const stegImagePath = path.join(servedStegDir, stegFilename);
+        if (requesterUser) {
+            const requesterURL = `http://${requesterUser.addr}`;
 
-        await fs.writeFile(stegImagePath, stegImageBuffer);
+            try {
+                // Send steg image directly to requester's UI
+                const FormData = require('form-data');
+                const formData = new FormData();
+                formData.append('stegImage', stegImageBuffer, { filename: stegFilename });
+                formData.append('metadata', JSON.stringify(metadata));
 
-        // Save metadata too
-        const metadataPath = path.join(servedStegDir, `${stegFilename}.json`);
-        await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+                await axios.post(`${requesterURL}/receive-steg-image`, formData, {
+                    headers: formData.getHeaders(),
+                    timeout: 10000
+                });
 
-        console.log(`✅ Steg image created and saved for ${requester} (P2P Pull): ${stegFilename}`);
+                console.log(`✅ Steg image sent to ${requester} at ${requesterURL}`);
+            } catch (e) {
+                console.warn(`Failed to send to ${requester}, saving locally:`, e.message);
 
-        // Clean up
+                // Fallback: save locally
+                const requesterViewableDir = path.join(__dirname, 'data', requester, 'viewable');
+                await fs.mkdir(requesterViewableDir, { recursive: true });
+                const stegImagePath = path.join(requesterViewableDir, stegFilename);
+                await fs.writeFile(stegImagePath, stegImageBuffer);
+                const metadataPath = path.join(requesterViewableDir, `${stegFilename}.json`);
+                await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+            }
+        }
+
         await fs.unlink(requestPath);
         await fs.unlink(coverTempPath).catch(() => { });
 
         console.log(`✅ Approved: ${approver} -> ${requester}, image: ${requestedImage}, views: ${viewCount}`);
 
-        res.json({ success: true, message: 'Request approved, image ready for pickup' });
+        res.json({ success: true, message: 'Image approved and encrypted' });
 
     } catch (e) {
         console.error('Approval error:', e);
@@ -751,7 +767,14 @@ app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => 
             : req.body.metadata;
         const stegImageBuffer = req.file.buffer;
 
-        // Save to first local user's viewable folder
+        // The recipient is the one who REQUESTED the image (opposite of metadata.from which is the approver)
+        // In the approval flow: approver sends to requester
+        // So we need to find who this steg image is FOR based on the cluster registration
+
+        // Since we know metadata.from is the approver, we need to determine the requester
+        // The best way is to check which local user exists, or use a 'to' field
+
+        // For now, save to first local user (the owner of this UI instance)
         const dataDir = path.join(__dirname, 'data');
         const users = await fs.readdir(dataDir).catch(() => []);
 
@@ -760,20 +783,19 @@ app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => 
             return res.status(404).json({ error: 'No users on this device' });
         }
 
-        for (const username of users) {
-            const viewableDir = path.join(dataDir, username, 'viewable');
-            await fs.mkdir(viewableDir, { recursive: true });
+        // Save to the first (and typically only) user on this device
+        const username = users[0];
+        const viewableDir = path.join(dataDir, username, 'viewable');
+        await fs.mkdir(viewableDir, { recursive: true });
 
-            const stegFilename = req.file.originalname;
-            const stegImagePath = path.join(viewableDir, stegFilename);
-            await fs.writeFile(stegImagePath, stegImageBuffer);
+        const stegFilename = req.file.originalname;
+        const stegImagePath = path.join(viewableDir, stegFilename);
+        await fs.writeFile(stegImagePath, stegImageBuffer);
 
-            const metadataPath = path.join(viewableDir, `${stegFilename}.json`);
-            await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+        const metadataPath = path.join(viewableDir, `${stegFilename}.json`);
+        await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 
-            console.log(`📨 Steg image received for ${username} from ${metadata.from}`);
-            break;
-        }
+        console.log(`📨 Steg image received for ${username} from ${metadata.from}`);
 
         res.json({ success: true });
     } catch (e) {
@@ -807,68 +829,6 @@ app.post('/api/reject', async (req, res) => {
     }
 });
 
-// Endpoint to list steg images waiting for a specific user (PULL Model)
-app.get('/api/p2p-my-steg/:requester', async (req, res) => {
-    try {
-        const { requester } = req.params;
-        const approver = req.session.username; // Current user is the approver holding the files
-
-        if (!approver) return res.json({ images: [] });
-
-        const servedStegDir = path.join(__dirname, 'data', approver, 'served-steg');
-
-        try {
-            const files = await fs.readdir(servedStegDir);
-            // Filter files meant for this requester: requester-timestamp.png
-            const myImages = files.filter(f => f.startsWith(`${requester}-`) && f.endsWith('.png'));
-
-            // returning metadata is tricky without reading all json files, so we'll just return filenames
-            // The client will fetch metadata separately or we infer it
-            const imagesWithMeta = [];
-            for (const img of myImages) {
-                const metaDis = img + '.json';
-                const metaPath = path.join(servedStegDir, metaDis);
-                let meta = {};
-                try {
-                    meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
-                } catch (e) { }
-
-                imagesWithMeta.push({
-                    filename: img,
-                    sender: approver,
-                    ...meta
-                });
-            }
-            res.json({ images: imagesWithMeta });
-        } catch (e) {
-            res.json({ images: [] });
-        }
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// Endpoint to serve the actual steg image file
-app.get('/api/p2p-steg-download/:filename', async (req, res) => {
-    try {
-        const { filename } = req.params;
-        // Search in all users' served-steg folders (in case multiple users log in same device)
-        const dataDir = path.join(__dirname, 'data');
-        const users = await fs.readdir(dataDir).catch(() => []);
-
-        for (const user of users) {
-            const filePath = path.join(dataDir, user, 'served-steg', filename);
-            try {
-                await fs.access(filePath);
-                return res.sendFile(filePath);
-            } catch (e) { }
-        }
-        res.status(404).json({ error: 'File not found' });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
 app.get('/api/viewable', async (req, res) => {
     if (!req.session.username) {
         return res.status(401).json({ error: 'Not logged in' });
@@ -876,79 +836,31 @@ app.get('/api/viewable', async (req, res) => {
 
     try {
         const username = req.session.username;
-        let allImages = [];
-
-        // 1. Get LOCAL viewable images (legacy/same-device)
         const viewableDir = path.join(__dirname, 'data', username, 'viewable');
+
+        let images = [];
         try {
             const files = await fs.readdir(viewableDir);
-            const imageFiles = files.filter(f => f.match(/\.(png|jpg|jpeg|webp)$/i));
+            const stegFiles = files.filter(f => f.startsWith('steg-') && f.endsWith('.png'));
 
-            for (const file of imageFiles) {
+            for (const file of stegFiles) {
                 const metadataPath = path.join(viewableDir, `${file}.json`);
-                let metadata = {};
                 try {
-                    const metadataContent = await fs.readFile(metadataPath, 'utf8');
-                    metadata = JSON.parse(metadataContent);
-                } catch (e) { }
-
-                allImages.push({
-                    filename: file,
-                    path: `/viewable-image/${username}/${file}`,
-                    ...metadata,
-                    source: 'local'
-                });
+                    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+                    images.push({
+                        filename: file,
+                        ...metadata
+                    });
+                } catch (e) {
+                    // Metadata missing
+                }
             }
-        } catch (e) { }
+        } catch (e) {
+            // Directory doesn't exist
+        }
 
-        // 2. Poll peers for images waiting for me (Pull Model)
-        try {
-            const response = await broadcastRequest(`/p2p-my-steg/${username}`, { method: 'GET' });
-            // Try to aggregate from all responses (if broadcast returns array or we query all servers)
-            // simplified: broadcastRequest returns "best" response.
+        res.json({ images, count: images.length });
 
-            // Ideally we should query ALL peers. 
-            // Since we don't have a "query all" function handy, we rely on the leader or random peer response. 
-            // To be robust, the UI should maybe poll known peers. 
-            // For now, let's assume the broadcast finds the approver.
-
-            if (response.data && response.data.images) {
-                const remoteImages = response.data.images.map(img => ({
-                    ...img,
-                    // Construct P2P download URL
-                    path: `http://${response.from}/api/p2p-steg-download/${img.filename}`,
-                    // Note: response.from might need to be the actual peer IP if broadcast proxying logic is used
-                    // Actually broadcastRequest returns response.data but doesn't easily set response.from
-                    // We need the peer's IP.
-                    // Making a hack: ask peer to include their IP in response
-                }));
-                // Wait, we need the IP. Let's fix the endpoint above to include it or use discovery.
-            }
-        } catch (e) { }
-
-        // Revised P2P Polling:
-        // Get list of online users, query each one directly
-        try {
-            const usersResp = await broadcastRequest('/users', { method: 'GET' });
-            const onlineUsers = usersResp.data.users.filter(u => u.username !== username);
-
-            for (const user of onlineUsers) {
-                try {
-                    const peerUrl = `http://${user.addr}`;
-                    const p2pResp = await axios.get(`${peerUrl}/api/p2p-my-steg/${username}`, { timeout: 2000 });
-                    if (p2pResp.data.images && p2pResp.data.images.length > 0) {
-                        const p2pImages = p2pResp.data.images.map(img => ({
-                            ...img,
-                            path: `${peerUrl}/api/p2p-steg-download/${img.filename}`,
-                            source: 'p2p'
-                        }));
-                        allImages = allImages.concat(p2pImages);
-                    }
-                } catch (e) { }
-            }
-        } catch (e) { }
-
-        res.json({ images: allImages });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
