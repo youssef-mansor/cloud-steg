@@ -312,39 +312,9 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
         const thumbnailPath = path.join(userImagesDir, thumbnailFilename);
         await fs.writeFile(thumbnailPath, thumbnailBuffer);
 
-        //Upload thumbnail to server
-        try {
-            const FormData = require('form-data');
-            const formData = new FormData();
-            formData.append('image', thumbnailBuffer, {
-                filename: originalName,
-                contentType: 'image/png'
-            });
-
-            // Try uploading to each server directly (not using broadcastRequest which doesn't handle FormData well)
-            let uploadSuccess = false;
-            for (const server of serverEndpoints) {
-                try {
-                    const response = await axios.post(`${server}/upload_image/${username}`, formData, {
-                        headers: formData.getHeaders(),
-                        timeout: 30000  // Increased to 30 seconds for slow uploads
-                    });
-                    console.log(`✅ Thumbnail uploaded to ${server}`);
-                    uploadSuccess = true;
-                    break; // Success on one server is enough (it will replicate)
-                } catch (e) {
-                    console.log(`❌ Failed to upload to ${server}:`, e.message);
-                }
-            }
-
-            if (uploadSuccess) {
-                console.log(`✅ Upload complete: original + thumbnail saved locally, thumbnail uploaded to server`);
-            } else {
-                console.warn('⚠️ Server upload failed on all servers, but local save succeeded');
-            }
-        } catch (e) {
-            console.warn('Server upload failed, but local save succeeded:', e.message);
-        }
+        // Skip server upload - cluster endpoint is too slow/broken (times out >30s)
+        // Images are saved locally and will be served via P2P
+        console.log(`✅ Upload complete: original + thumbnail saved locally (using P2P for cross-device)`);
 
         res.json({
             success: true,
@@ -382,7 +352,26 @@ app.get('/api/user-images/:username', async (req, res) => {
             return res.json({ images: localThumbnails, count: localThumbnails.length });
         }
 
-        // Otherwise, fetch from cluster server (for cross-device users)
+        // P2P: Fetch thumbnails directly from owner's device
+        try {
+            // Get owner's address from cluster
+            const usersResponse = await broadcastRequest('/users', { method: 'GET' });
+            const ownerUser = usersResponse.data.users.find(u => u.username === username);
+
+            if (ownerUser) {
+                const ownerURL = `http://${ownerUser.addr}`;
+                console.log(`📡 Fetching ${username}'s images from P2P at ${ownerURL}`);
+
+                const response = await axios.get(`${ownerURL}/p2p-images`, { timeout: 5000 });
+                if (response.data && response.data.images) {
+                    return res.json(response.data);
+                }
+            }
+        } catch (e) {
+            console.log(`P2P fetch failed for ${username}:`, e.message);
+        }
+
+        // Fallback: try cluster server (though it's usually empty)
         try {
             const response = await broadcastRequest(`/images/${username}`, { method: 'GET' });
             if (response.data && response.data.images) {
