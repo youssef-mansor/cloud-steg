@@ -513,8 +513,8 @@ app.get('/p2p-image/:filename', async (req, res) => {
         // If username specified, look only in that user's folder
         const usersToCheck = username ? [username] : await fs.readdir(dataDir).catch(() => []);
 
-        for (const username of users) {
-            const imagePath = path.join(dataDir, username, 'images', filename);
+        for (const user of usersToCheck) {
+            const imagePath = path.join(dataDir, user, 'images', filename);
             try {
                 await fs.access(imagePath);
                 return res.sendFile(imagePath);
