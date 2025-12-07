@@ -197,6 +197,42 @@ app.post('/api/login', async (req, res) => {
         await ensureUserDirectory(username);
         startHeartbeat(username, userAddr);
 
+        // Sync view count updates from cluster (for offline period)
+        try {
+            const notesResponse = await broadcastRequest(`/get_note/${username}`, { method: 'GET' });
+
+            if (notesResponse.data && notesResponse.data.notes && notesResponse.data.notes.length > 0) {
+                console.log(`📥 Found ${notesResponse.data.notes.length} pending view count updates for ${username}`);
+
+                for (const note of notesResponse.data.notes) {
+                    const { image_filename, view_count_edit } = note;
+
+                    const viewableDir = path.join(__dirname, 'data', username, 'viewable');
+                    try {
+                        const files = await fs.readdir(viewableDir);
+
+                        for (const file of files) {
+                            if (!file.endsWith('.json')) continue;
+
+                            const metadataPath = path.join(viewableDir, file);
+                            const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+
+                            if (metadata.originalImage === image_filename) {
+                                metadata.viewCount = view_count_edit;
+                                await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+                                console.log(`✅ Updated view count for ${image_filename} to ${view_count_edit}`);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to apply view count update for ${image_filename}:`, e.message);
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('No pending view count updates or cluster unreachable:', e.message);
+        }
+
         res.json({
             success: true,
             username,
@@ -470,62 +506,6 @@ app.get('/api/image/:username/:filename', async (req, res) => {
     } catch (e) {
         console.error('Image serve error:', e.message);
         res.status(404).json({ error: 'Image not found' });
-    }
-});
-
-// Login endpoint (for UI to establish session and sync notes)
-app.post('/api/login', async (req, res) => {
-    try {
-        const username = req.body.username;
-        if (!username) {
-            return res.status(400).json({ error: 'Username required' });
-        }
-
-        req.session.username = username;
-
-        // Start heartbeat
-        startHeartbeat(username);
-
-        // Sync view count updates from cluster (for offline period)
-        try {
-            const notesResponse = await broadcastRequest(`/get_note/${username}`, { method: 'GET' });
-
-            if (notesResponse.data && notesResponse.data.notes && notesResponse.data.notes.length > 0) {
-                console.log(`📥 Found ${notesResponse.data.notes.length} pending view count updates for ${username}`);
-
-                for (const note of notesResponse.data.notes) {
-                    const { image_filename, view_count_edit } = note;
-
-                    // Find and update the viewable metadata
-                    const viewableDir = path.join(__dirname, 'data', username, 'viewable');
-                    try {
-                        const files = await fs.readdir(viewableDir);
-
-                        for (const file of files) {
-                            if (!file.endsWith('.json')) continue;
-
-                            const metadataPath = path.join(viewableDir, file);
-                            const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-
-                            if (metadata.originalImage === image_filename) {
-                                metadata.viewCount = view_count_edit;
-                                await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-                                console.log(`✅ Updated view count for ${image_filename} to ${view_count_edit}`);
-                                break;
-                            }
-                        }
-                    } catch (e) {
-                        console.warn(`Failed to apply view count update for ${image_filename}:`, e.message);
-                    }
-                }
-            }
-        } catch (e) {
-            console.log('No pending view count updates or cluster unreachable:', e.message);
-        }
-
-        res.json({ success: true, username });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
     }
 });
 
