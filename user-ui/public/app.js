@@ -120,6 +120,7 @@ async function login() {
         // Load initial data
         loadMyImages();
         loadOnlineUsers();
+        displayApprovedRequests(); // Load approved requests from localStorage
 
     } catch (e) {
         console.error('Login failed:', e);
