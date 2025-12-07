@@ -431,9 +431,10 @@ function approveRequest(idx) {
     viewCountInput.value = 5;
     coverImageInput.value = '';
 
-    approveModal.dataset.requestId = `${Date.now()}-${req.from}.json`;
-    approveModal.dataset.image = req.image;  // Store for recordApproval
-    approveModal.dataset.requester = req.from;  // Store for recordApproval
+    // Use the actual request filename (timestamp-from.json format)
+    approveModal.dataset.requestId = `${req.timestamp}-${req.from}.json`;
+    approveModal.dataset.image = req.image;
+    approveModal.dataset.requester = req.from;
     approveModal.classList.remove('hidden');
 }
 
