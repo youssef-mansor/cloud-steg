@@ -353,18 +353,32 @@ app.get('/api/user-images/:username', async (req, res) => {
     try {
         const { username } = req.params;
 
-        // Return LOCAL thumbnail images (128x128) for fast display
+        // First try LOCAL thumbnail images (for same-device users)
         const userDir = path.join(__dirname, 'data', username, 'images');
         let localThumbnails = [];
         try {
             const files = await fs.readdir(userDir);
-            // Only thumbnails for fast loading in browse view
             localThumbnails = files.filter(f => f.includes('-thumb-') && f.match(/\.(png|jpg|jpeg|webp)$/i));
         } catch (e) {
             localThumbnails = [];
         }
 
-        res.json({ images: localThumbnails, count: localThumbnails.length });
+        // If local thumbnails exist, use them
+        if (localThumbnails.length > 0) {
+            return res.json({ images: localThumbnails, count: localThumbnails.length });
+        }
+
+        // Otherwise, fetch from cluster server (for cross-device users)
+        try {
+            const response = await broadcastRequest(`/images/${username}`, { method: 'GET' });
+            if (response.data && response.data.images) {
+                return res.json(response.data);
+            }
+        } catch (e) {
+            console.log(`Failed to get images from server for ${username}:`, e.message);
+        }
+
+        res.json({ images: [], count: 0 });
 
     } catch (e) {
         res.status(500).json({ error: e.message });
