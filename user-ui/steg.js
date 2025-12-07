@@ -28,9 +28,6 @@ function encryptData(imageBuffer, metadata, key) {
 /**
  * Decrypt data to get image and metadata
  */
-/**
- * Decrypt data to get image and metadata
- */
 function decryptData(encryptedData, key) {
     try {
         const decrypted = CryptoJS.AES.decrypt(encryptedData, key);
@@ -50,7 +47,79 @@ function decryptData(encryptedData, key) {
     }
 }
 
-// ... unchanged embed/extract functions
+/**
+ * Embed encrypted data into cover image using LSB steganography
+ */
+async function embedDataInImage(coverImagePath, secretData) {
+    // Read cover image
+    const coverBuffer = await fs.readFile(coverImagePath);
+    const coverImage = sharp(coverBuffer);
+    const metadata = await coverImage.metadata();
+
+    // Get raw pixel data
+    const { data: pixels, info } = await coverImage
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+    // Convert secret data to binary
+    const secretBinary = stringToBinary(secretData);
+
+    // Embed length header (32 bits for data length)
+    const lengthBinary = secretBinary.length.toString(2).padStart(32, '0');
+    const fullBinary = lengthBinary + secretBinary;
+
+    // Check if cover image has enough capacity
+    const maxCapacity = pixels.length; // One bit per byte
+    if (fullBinary.length > maxCapacity) {
+        throw new Error('Cover image too small for secret data');
+    }
+
+    // Embed data in LSB
+    for (let i = 0; i < fullBinary.length; i++) {
+        pixels[i] = (pixels[i] & 0xFE) | parseInt(fullBinary[i]);
+    }
+
+    // Create steg image
+    const stegImage = await sharp(pixels, {
+        raw: {
+            width: info.width,
+            height: info.height,
+            channels: info.channels
+        }
+    }).png().toBuffer();
+
+    return stegImage;
+}
+
+/**
+ * Extract encrypted data from steg image
+ */
+async function extractDataFromImage(stegImagePath) {
+    // Read steg image
+    const stegBuffer = await fs.readFile(stegImagePath);
+    const stegImage = sharp(stegBuffer);
+
+    // Get raw pixel data
+    const { data: pixels } = await stegImage.raw().toBuffer({ resolveWithObject: true });
+
+    // Extract length header (first 32 bits)
+    let lengthBinary = '';
+    for (let i = 0; i < 32; i++) {
+        lengthBinary += (pixels[i] & 1).toString();
+    }
+    const dataLength = parseInt(lengthBinary, 2);
+
+    // Extract secret data
+    let secretBinary = '';
+    for (let i = 32; i < 32 + dataLength; i++) {
+        secretBinary += (pixels[i] & 1).toString();
+    }
+
+    // Convert binary to string
+    const secretData = binaryToString(secretBinary);
+
+    return secretData;
+}
 
 /**
  * Convert string to binary string (UTF-8 safe)
