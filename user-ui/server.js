@@ -65,9 +65,10 @@ async function broadcastRequest(path, options = {}) {
     const promises = serverEndpoints.map(async (server) => {
         try {
             const url = `${server}${path}`;
-            const response = await axios({ url, ...options, timeout: 1500 });
-            return response;
+            const response = await axios({ url, ...options, timeout: 5000 }); // Increased timeout
+            return { server, response };
         } catch (e) {
+            console.log(`❌ ${server}${path} failed: ${e.message}`);
             return null;
         }
     });
@@ -75,21 +76,27 @@ async function broadcastRequest(path, options = {}) {
     const results = await Promise.all(promises);
     const successResponses = results.filter(r => r !== null);
 
+    console.log(`📡 Broadcast to ${path}: ${successResponses.length}/${serverEndpoints.length} responded`);
+
     if (successResponses.length === 0) {
         throw new Error('No server available');
     }
 
     // Prefer responses with data (from leader)
-    // Check if response has users array with data, or images array with data, etc.
     const responseWithData = successResponses.find(r => {
-        const data = r.data;
-        return (data.users && data.users.length > 0) ||
+        const data = r.response.data;
+        const hasData = (data.users && data.users.length > 0) ||
             (data.images && data.images.length > 0) ||
             (data.online_clients && data.online_clients.length > 0);
+
+        if (hasData) {
+            console.log(`✅ Using response from ${r.server} with data`);
+        }
+        return hasData;
     });
 
     // Return response with data, or first successful response as fallback
-    return responseWithData || successResponses[0];
+    return responseWithData ? responseWithData.response : successResponses[0].response;
 }
 
 async function ensureUserDirectory(username) {
@@ -455,6 +462,7 @@ app.post('/api/request-view', async (req, res) => {
         // Send request directly to recipient's UI server
         try {
             await axios.post(`${recipientURL}/receive-request`, {
+                to: username,  // ADD: specify who should receive this
                 from: fromUser,
                 image: image,
                 timestamp: request.timestamp
@@ -481,29 +489,20 @@ app.post('/api/request-view', async (req, res) => {
 // Endpoint to receive requests from other UI servers
 app.post('/receive-request', async (req, res) => {
     try {
-        const { from, image, timestamp } = req.body;
+        const { to, from, image, timestamp } = req.body;
 
-        // Get the current logged-in user (recipient)
-        // Since this is cross-device, we need to determine who should receive this
-        // We'll save it for ALL local users, or use a query parameter
-
-        // For now, extract username from the image request context
-        // Better: use query param or scan all local users
-
-        // Let's find which local user this request is for by checking session or scanning
-        const dataDir = path.join(__dirname, 'data');
-        const users = await fs.readdir(dataDir).catch(() => []);
-
-        for (const username of users) {
-            const requestsDir = path.join(dataDir, username, 'requests');
-            await fs.mkdir(requestsDir, { recursive: true });
-
-            const requestFile = path.join(requestsDir, `${timestamp}-${from}.json`);
-            await fs.writeFile(requestFile, JSON.stringify({ from, image, timestamp }, null, 2));
-
-            console.log(`📨 Request received for ${username} from ${from}`);
-            break; // Only save to first user (the owner of this UI instance)
+        if (!to) {
+            return res.status(400).json({ error: 'Recipient username required' });
         }
+
+        // Save to the SPECIFIED user's requests folder
+        const requestsDir = path.join(__dirname, 'data', to, 'requests');
+        await fs.mkdir(requestsDir, { recursive: true });
+
+        const requestFile = path.join(requestsDir, `${timestamp}-${from}.json`);
+        await fs.writeFile(requestFile, JSON.stringify({ from, image, timestamp }, null, 2));
+
+        console.log(`📨 Request received for ${to} from ${from}`);
 
         res.json({ success: true });
     } catch (e) {

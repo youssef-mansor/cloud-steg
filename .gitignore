@@ -12,3 +12,7 @@ user-ui/data/
 user-ui/node_modules/@img/
 user-ui/server.js.backup
 user-ui/view-image-endpoint.js
+# Sensitive files
+credentials/*.json
+*.log
+cookies.txt
