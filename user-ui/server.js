@@ -65,25 +65,6 @@ async function findLeader() {
 }
 
 // Find the actual leader by checking all servers
-async function findActualLeader() {
-    for (const server of serverEndpoints) {
-        try {
-            const response = await axios.get(`${server}/`, { timeout: 3000 });
-            console.log(`🔍 Checking ${server}: is_leader=${response.data.is_leader}`);
-            if (response.data.is_leader) {
-                console.log(`✅ Found leader at ${server}`);
-                return server;
-            }
-        } catch (e) {
-            console.log(`⚠️ Could not reach ${server}: ${e.message}`);
-            // Continue to next server
-        }
-    }
-    // Fallback to first server if no leader responds
-    console.log(`⚠️ No leader found, using first server ${serverEndpoints[0]}`);
-    return serverEndpoints[0];
-}
-
 // Helper function to check if response has data
 function hasResponseData(data) {
     if (!data) return false;
@@ -93,51 +74,34 @@ function hasResponseData(data) {
     if (data.online_clients && data.online_clients.length > 0) return true;
     if (data.success) return true;
     if (data.count && data.count > 0) return true;
+    if (data.notes && data.notes.length > 0) return true;
     return false;
 }
 
-// Broadcast request to all servers, return the best response (from leader)
+// Broadcast request to all servers in parallel, return best response
 async function broadcastRequest(path, options = {}) {
-    // Find and try leader first with longer timeout
-    const leaderServer = await findActualLeader();
-    
-    try {
-        const url = `${leaderServer}${path}`;
-        const config = { ...options, timeout: 15000 }; // Ensure timeout is 15s
-        const response = await axios({ url, ...config });
-        console.log(`✅ Using response from ${leaderServer}`);
-        return response;
-    } catch (e) {
-        // If it's a 409 (Conflict - user already exists), treat it as success for registration
-        if (e.response && e.response.status === 409 && path.includes('/register')) {
-            console.log(`✅ User already exists on ${leaderServer}, treating as success`);
-            return e.response;
-        }
-        console.log(`❌ Leader ${leaderServer}${path} failed: ${e.message}`);
-    }
-
-    // Fallback: try all servers in parallel
+    // Try ALL servers in parallel - this is the fastest approach
     const promises = serverEndpoints.map(async (server) => {
         try {
             const url = `${server}${path}`;
-            const config = { ...options, timeout: 15000 }; // Ensure timeout is 15s
+            const config = { ...options, timeout: 10000 }; // 10s timeout
             const response = await axios({ url, ...config });
-            return { server, response };
+            return { server, response, success: true };
         } catch (e) {
             // If it's a 409 (Conflict - user already exists), treat it as success for registration
             if (e.response && e.response.status === 409 && path.includes('/register')) {
-                console.log(`✅ User already exists on ${server}, treating as success`);
-                return { server, response: e.response };
+                return { server, response: e.response, success: true };
             }
-            console.log(`❌ ${server}${path} failed: ${e.message}`);
-            return null;
+            return { server, error: e.message, success: false };
         }
     });
 
     const results = await Promise.all(promises);
-    const successResponses = results.filter(r => r !== null);
+    const successResponses = results.filter(r => r.success);
+    const failedResponses = results.filter(r => !r.success);
 
-    console.log(`📡 Broadcast to ${path}: ${successResponses.length}/${serverEndpoints.length} responded`);
+    // Log failures quietly
+    failedResponses.forEach(r => console.log(`❌ ${r.server}${path}: ${r.error}`));
 
     if (successResponses.length === 0) {
         throw new Error('No server available');
@@ -146,12 +110,12 @@ async function broadcastRequest(path, options = {}) {
     // Prefer responses with actual data over empty responses
     const responseWithData = successResponses.find(r => hasResponseData(r.response.data));
     if (responseWithData) {
-        console.log(`✅ Using response from ${responseWithData.server} (has data)`);
+        console.log(`✅ ${path}: using ${responseWithData.server} (has data)`);
         return responseWithData.response;
     }
 
-    // Fallback to first response if no data found
-    console.log(`⚠️ No response with data found, using first response`);
+    // Fallback to first successful response
+    console.log(`📡 ${path}: ${successResponses.length}/${serverEndpoints.length} responded`);
     return successResponses[0].response;
 }
 
