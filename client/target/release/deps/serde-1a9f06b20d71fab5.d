@@ -1,0 +1,14 @@
+/home/barbary/distttttttttttt/cloud-steg/client/target/release/deps/serde-1a9f06b20d71fab5.d: /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/barbary/distttttttttttt/cloud-steg/client/target/release/build/serde-2bfb92bfee02571d/out/private.rs
+
+/home/barbary/distttttttttttt/cloud-steg/client/target/release/deps/libserde-1a9f06b20d71fab5.rlib: /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/barbary/distttttttttttt/cloud-steg/client/target/release/build/serde-2bfb92bfee02571d/out/private.rs
+
+/home/barbary/distttttttttttt/cloud-steg/client/target/release/deps/libserde-1a9f06b20d71fab5.rmeta: /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/barbary/distttttttttttt/cloud-steg/client/target/release/build/serde-2bfb92bfee02571d/out/private.rs
+
+/home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/barbary/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/barbary/distttttttttttt/cloud-steg/client/target/release/build/serde-2bfb92bfee02571d/out/private.rs:
+
+# env-dep:OUT_DIR=/home/barbary/distttttttttttt/cloud-steg/client/target/release/build/serde-2bfb92bfee02571d/out

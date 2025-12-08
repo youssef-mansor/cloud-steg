@@ -5,43 +5,9 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
-const os = require('os');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-// Helper function to get the device's local IP address
-function getLocalIPAddress() {
-    const interfaces = os.networkInterfaces();
-    const addresses = [];
-    
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            // Skip internal (loopback) and non-IPv4 addresses
-            if (iface.family === 'IPv4' && !iface.internal) {
-                addresses.push({ name, address: iface.address });
-            }
-        }
-    }
-    
-    if (addresses.length === 0) {
-        console.warn('⚠️ No network interfaces found, using localhost');
-        return '127.0.0.1';
-    }
-    
-    // Log all available addresses
-    console.log('📍 Available network interfaces:');
-    addresses.forEach(({ name, address }) => {
-        console.log(`   - ${name}: ${address}`);
-    });
-    
-    // Prefer en0 (WiFi) or en1 (Ethernet) over other interfaces
-    const preferred = addresses.find(a => a.name === 'en0' || a.name === 'en1');
-    const selected = preferred || addresses[0];
-    
-    console.log(`✅ Selected interface: ${selected.name} (${selected.address})`);
-    return selected.address;
-}
 
 // Server endpoints (active servers in cluster)
 const serverEndpoints = process.env.SERVER_ENDPOINTS
@@ -98,14 +64,71 @@ async function findLeader() {
     return leader || serverEndpoints[0];
 }
 
+// Find the actual leader by checking all servers
+async function findActualLeader() {
+    for (const server of serverEndpoints) {
+        try {
+            const response = await axios.get(`${server}/`, { timeout: 3000 });
+            console.log(`🔍 Checking ${server}: is_leader=${response.data.is_leader}`);
+            if (response.data.is_leader) {
+                console.log(`✅ Found leader at ${server}`);
+                return server;
+            }
+        } catch (e) {
+            console.log(`⚠️ Could not reach ${server}: ${e.message}`);
+            // Continue to next server
+        }
+    }
+    // Fallback to first server if no leader responds
+    console.log(`⚠️ No leader found, using first server ${serverEndpoints[0]}`);
+    return serverEndpoints[0];
+}
+
+// Helper function to check if response has data
+function hasResponseData(data) {
+    if (!data) return false;
+    // Check for common data fields
+    if (data.users && data.users.length > 0) return true;
+    if (data.images && data.images.length > 0) return true;
+    if (data.online_clients && data.online_clients.length > 0) return true;
+    if (data.success) return true;
+    if (data.count && data.count > 0) return true;
+    return false;
+}
+
 // Broadcast request to all servers, return the best response (from leader)
 async function broadcastRequest(path, options = {}) {
+    // Find and try leader first with longer timeout
+    const leaderServer = await findActualLeader();
+    
+    try {
+        const url = `${leaderServer}${path}`;
+        const config = { ...options, timeout: 15000 }; // Ensure timeout is 15s
+        const response = await axios({ url, ...config });
+        console.log(`✅ Using response from ${leaderServer}`);
+        return response;
+    } catch (e) {
+        // If it's a 409 (Conflict - user already exists), treat it as success for registration
+        if (e.response && e.response.status === 409 && path.includes('/register')) {
+            console.log(`✅ User already exists on ${leaderServer}, treating as success`);
+            return e.response;
+        }
+        console.log(`❌ Leader ${leaderServer}${path} failed: ${e.message}`);
+    }
+
+    // Fallback: try all servers in parallel
     const promises = serverEndpoints.map(async (server) => {
         try {
             const url = `${server}${path}`;
-            const response = await axios({ url, ...options, timeout: 5000 }); // Increased timeout
+            const config = { ...options, timeout: 15000 }; // Ensure timeout is 15s
+            const response = await axios({ url, ...config });
             return { server, response };
         } catch (e) {
+            // If it's a 409 (Conflict - user already exists), treat it as success for registration
+            if (e.response && e.response.status === 409 && path.includes('/register')) {
+                console.log(`✅ User already exists on ${server}, treating as success`);
+                return { server, response: e.response };
+            }
             console.log(`❌ ${server}${path} failed: ${e.message}`);
             return null;
         }
@@ -120,21 +143,16 @@ async function broadcastRequest(path, options = {}) {
         throw new Error('No server available');
     }
 
-    // Prefer responses with data (from leader)
-    const responseWithData = successResponses.find(r => {
-        const data = r.response.data;
-        const hasData = (data.users && data.users.length > 0) ||
-            (data.images && data.images.length > 0) ||
-            (data.online_clients && data.online_clients.length > 0);
+    // Prefer responses with actual data over empty responses
+    const responseWithData = successResponses.find(r => hasResponseData(r.response.data));
+    if (responseWithData) {
+        console.log(`✅ Using response from ${responseWithData.server} (has data)`);
+        return responseWithData.response;
+    }
 
-        if (hasData) {
-            console.log(`✅ Using response from ${r.server} with data`);
-        }
-        return hasData;
-    });
-
-    // Return response with data, or first successful response as fallback
-    return responseWithData ? responseWithData.response : successResponses[0].response;
+    // Fallback to first response if no data found
+    console.log(`⚠️ No response with data found, using first response`);
+    return successResponses[0].response;
 }
 
 async function ensureUserDirectory(username) {
@@ -178,9 +196,7 @@ function stopHeartbeat(username) {
 
 // ============== Registration ==============
 
-// CLIENT_IP can be manually set via environment variable if auto-detection fails
-// Example: CLIENT_IP=10.40.53.194 PORT=8000 node server.js
-const CLIENT_IP = process.env.CLIENT_IP || getLocalIPAddress();
+const CLIENT_IP = process.env.CLIENT_IP || '10.40.48.133';
 const CLIENT_PORT = parseInt(process.env.PORT) || 8000;
 
 app.post('/api/register', async (req, res) => {
@@ -226,35 +242,12 @@ app.post('/api/login', async (req, res) => {
             return res.status(404).json({ error: 'User not registered. Please register first.' });
         }
 
-        // Use current device IP, not the stored cluster address
-        // This allows users to login from different devices
-        const currentAddr = `${CLIENT_IP}:${CLIENT_PORT}`;
-        
-        // If the current device IP differs from cluster, update the cluster
-        if (user.addr !== currentAddr) {
-            console.log(`🔄 User ${username} logging in from different device. Updating cluster...`);
-            console.log(`   Old address: ${user.addr}`);
-            console.log(`   New address: ${currentAddr}`);
-            
-            try {
-                // Re-register to update the address in the cluster
-                await broadcastRequest('/register', {
-                    method: 'POST',
-                    data: { username, addr: currentAddr },
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                console.log(`✅ Cluster updated with new address for ${username}`);
-            } catch (updateErr) {
-                console.error(`⚠️ Failed to update cluster address:`, updateErr.message);
-                // Continue anyway - heartbeat will use correct local IP
-            }
-        }
-        
+        const userAddr = user.addr;
         req.session.username = username;
-        req.session.addr = currentAddr;
+        req.session.addr = userAddr;
 
         await ensureUserDirectory(username);
-        startHeartbeat(username, currentAddr);
+        startHeartbeat(username, userAddr);
 
         // Sync view count updates from cluster (for offline period)
         try {
@@ -649,6 +642,9 @@ app.get('/api/discover', async (req, res) => {
 // ============== Request Endpoints (Placeholder) ==============
 
 app.post('/api/request-view', async (req, res) => {
+    console.log(`📥 Received request-view API call from session user: ${req.session.username}`);
+    console.log(`📥 Request body:`, req.body);
+    
     if (!req.session.username) {
         return res.status(401).json({ error: 'Not logged in' });
     }
@@ -966,8 +962,6 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
         // Get requester's address and send steg image to their UI
         const usersResponse = await broadcastRequest('/users', { method: 'GET' });
         const requesterUser = usersResponse.data.users.find(u => u.username === requester);
-        
-        let deliverySuccess = false;
 
         if (requesterUser) {
             const requesterURL = `http://${requesterUser.addr}`;
@@ -985,47 +979,49 @@ app.post('/api/approve', upload.single('coverImage'), async (req, res) => {
                 });
 
                 console.log(`✅ Steg image sent to ${requester} at ${requesterURL}`);
-                deliverySuccess = true;
             } catch (e) {
-                console.warn(`⚠️ Failed to send to ${requester} via P2P (${requesterURL}):`, e.message);
-            }
-        } else {
-            console.warn(`⚠️ Requester ${requester} not found in cluster`);
-        }
+                console.warn(`Failed to send to ${requester}, saving locally AND to cluster:`, e.message);
 
-        // If P2P delivery failed, store backup locally for later sync
-        if (!deliverySuccess) {
-            try {
+                // Fallback: save locally
                 const requesterViewableDir = path.join(__dirname, 'data', requester, 'viewable');
                 await fs.mkdir(requesterViewableDir, { recursive: true });
                 const stegImagePath = path.join(requesterViewableDir, stegFilename);
                 await fs.writeFile(stegImagePath, stegImageBuffer);
                 const metadataPath = path.join(requesterViewableDir, `${stegFilename}.json`);
                 await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-                console.log(`✅ Steg image stored in fallback location for ${requester}`);
-                deliverySuccess = true;
-            } catch (fallbackErr) {
-                console.warn(`⚠️ Failed to store in fallback location:`, fallbackErr.message);
-            }
-        }
 
-        // Always sync view count with cluster for consistency
-        try {
-            await broadcastRequest('/add_note', {
-                method: 'POST',
-                data: {
-                    target_username: requester,
-                    target_image: requestedImage,
-                    view_count_edit: parseInt(viewCount)
+                // ALSO: Send view count update to cluster for offline sync
+                try {
+                    await broadcastRequest('/add_note', {
+                        method: 'POST',
+                        data: {
+                            target_username: requester,
+                            target_image: requestedImage,
+                            view_count_edit: parseInt(viewCount)
+                        }
+                    });
+                    console.log(`📝 View count update stored in cluster for offline user ${requester}`);
+                } catch (clusterErr) {
+                    console.warn(`Failed to store view count in cluster:`, clusterErr.message);
                 }
-            });
-            console.log(`📝 View count synchronized with cluster for ${requester}`);
-        } catch (clusterErr) {
-            console.warn(`⚠️ Failed to sync view count with cluster:`, clusterErr.message);
-        }
+            }
+        } else {
+            console.warn(`Requester ${requester} not found in cluster`);
 
-        if (!deliverySuccess) {
-            console.warn(`⚠️ WARNING: Image delivery incomplete - requester may retrieve on next login`);
+            // Still try to store view count update in cluster
+            try {
+                await broadcastRequest('/add_note', {
+                    method: 'POST',
+                    data: {
+                        target_username: requester,
+                        target_image: requestedImage,
+                        view_count_edit: parseInt(viewCount)
+                    }
+                });
+                console.log(`📝 View count update stored in cluster for offline user ${requester}`);
+            } catch (clusterErr) {
+                console.warn(`Failed to store view count in cluster:`, clusterErr.message);
+            }
         }
 
         await fs.unlink(requestPath);
@@ -1053,39 +1049,52 @@ app.post('/receive-steg-image', upload.single('stegImage'), async (req, res) => 
             : req.body.metadata;
         const stegImageBuffer = req.file.buffer;
 
-        if (!metadata || !metadata.to) {
-            return res.status(400).json({ error: 'Invalid metadata: missing recipient (to field)' });
-        }
+        // The recipient is the one who REQUESTED the image (opposite of metadata.from which is the approver)
+        // In the approval flow: approver sends to requester
+        // So we need to find who this steg image is FOR based on the cluster registration
 
-        // Use the 'to' field from metadata - this is the actual intended recipient
-        // ALWAYS create directory for this user, even if they haven't logged in yet
-        const recipientUsername = metadata.to;
+        // Since we know metadata.from is the approver, we need to determine the requester
+        // The best way is to check which local user exists, or use a 'to' field
+
+        // For now, save to first local user (the owner of this UI instance)
         const dataDir = path.join(__dirname, 'data');
-        
-        // Ensure recipient user directory exists (create if needed)
-        const userDir = path.join(dataDir, recipientUsername);
-        const viewableDir = path.join(userDir, 'viewable');
+        const users = await fs.readdir(dataDir).catch(() => []);
 
-        try {
-            await fs.mkdir(viewableDir, { recursive: true });
-        } catch (mkdirErr) {
-            console.error(`Failed to create directory for ${recipientUsername}:`, mkdirErr.message);
-            return res.status(500).json({ error: 'Failed to create storage directory' });
+        if (users.length === 0) {
+            console.error('No users found on this device');
+            return res.status(404).json({ error: 'No users on this device' });
         }
+
+        // Save to the correct recipient user (from metadata.to field)
+        let recipientUsername = null;
+
+        // Check if metadata has 'to' field
+        if (metadata.to) {
+            // Check if this user exists on this device
+            if (users.includes(metadata.to)) {
+                recipientUsername = metadata.to;
+            }
+        }
+
+        // Fallback to first user if recipient not found
+        if (!recipientUsername) {
+            recipientUsername = users[0];
+            console.warn(`Recipient '${metadata.to}' not found on this device, saving to first user: ${recipientUsername}`);
+        }
+
+        const viewableDir = path.join(dataDir, recipientUsername, 'viewable');
+        await fs.mkdir(viewableDir, { recursive: true });
 
         const stegFilename = req.file.originalname;
         const stegImagePath = path.join(viewableDir, stegFilename);
-        const metadataPath = path.join(viewableDir, `${stegFilename}.json`);
+        await fs.writeFile(stegImagePath, stegImageBuffer);
 
-        try {
-            await fs.writeFile(stegImagePath, stegImageBuffer);
-            await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-            console.log(`📨 Steg image successfully received for ${recipientUsername} from ${metadata.from}`);
-            res.json({ success: true, recipient: recipientUsername });
-        } catch (writeErr) {
-            console.error(`Failed to write steg image for ${recipientUsername}:`, writeErr.message);
-            return res.status(500).json({ error: 'Failed to write steg image' });
-        }
+        const metadataPath = path.join(viewableDir, `${stegFilename}.json`);
+        await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+
+        console.log(`📨 Steg image received for ${recipientUsername} from ${metadata.from}`);
+
+        res.json({ success: true });
     } catch (e) {
         console.error('Receive steg image error:', e);
         res.status(500).json({ error: e.message });
@@ -1127,18 +1136,6 @@ app.get('/api/viewable', async (req, res) => {
         const viewableDir = path.join(__dirname, 'data', username, 'viewable');
 
         let images = [];
-        // Safely create viewable directory if it does not exist
-        try {
-            await fs.mkdir(viewableDir, { recursive: true });
-        } catch (e) {
-            console.warn(`Failed to ensure viewable directory exists for ${username}:`, e.message);
-        }
-        // Safely create viewable directory if it doesn't exist
-        try {
-            await fs.mkdir(viewableDir, { recursive: true });
-        } catch (e) {
-            console.warn(`Failed to ensure viewable directory exists for ${username}:`, e.message);
-        }
         try {
             const files = await fs.readdir(viewableDir);
             const stegFiles = files.filter(f => f.startsWith('steg-') && f.endsWith('.png'));
