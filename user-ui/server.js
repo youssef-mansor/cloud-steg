@@ -226,12 +226,35 @@ app.post('/api/login', async (req, res) => {
             return res.status(404).json({ error: 'User not registered. Please register first.' });
         }
 
-        const userAddr = user.addr;
+        // Use current device IP, not the stored cluster address
+        // This allows users to login from different devices
+        const currentAddr = `${CLIENT_IP}:${CLIENT_PORT}`;
+        
+        // If the current device IP differs from cluster, update the cluster
+        if (user.addr !== currentAddr) {
+            console.log(`🔄 User ${username} logging in from different device. Updating cluster...`);
+            console.log(`   Old address: ${user.addr}`);
+            console.log(`   New address: ${currentAddr}`);
+            
+            try {
+                // Re-register to update the address in the cluster
+                await broadcastRequest('/register', {
+                    method: 'POST',
+                    data: { username, addr: currentAddr },
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                console.log(`✅ Cluster updated with new address for ${username}`);
+            } catch (updateErr) {
+                console.error(`⚠️ Failed to update cluster address:`, updateErr.message);
+                // Continue anyway - heartbeat will use correct local IP
+            }
+        }
+        
         req.session.username = username;
-        req.session.addr = userAddr;
+        req.session.addr = currentAddr;
 
         await ensureUserDirectory(username);
-        startHeartbeat(username, userAddr);
+        startHeartbeat(username, currentAddr);
 
         // Sync view count updates from cluster (for offline period)
         try {
