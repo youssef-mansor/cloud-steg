@@ -222,6 +222,7 @@ app.post('/api/login', async (req, res) => {
 
                 for (const note of notesResponse.data.notes) {
                     const { image_filename, view_count_edit } = note;
+                    const isRevoke = view_count_edit === 0;
 
                     const viewableDir = path.join(__dirname, 'data', username, 'viewable');
                     try {
@@ -234,14 +235,23 @@ app.post('/api/login', async (req, res) => {
                             const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
 
                             if (metadata.originalImage === image_filename) {
-                                metadata.viewCount = view_count_edit;
-                                await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-                                console.log(`✅ Updated view count for ${image_filename} to ${view_count_edit}`);
+                                if (isRevoke) {
+                                    // REVOKE: Delete both the steg image and metadata
+                                    const stegImagePath = metadataPath.replace('.json', '');
+                                    await fs.unlink(metadataPath).catch(() => {});
+                                    await fs.unlink(stegImagePath).catch(() => {});
+                                    console.log(`🚫 REVOKED: Deleted ${image_filename} for ${username}`);
+                                } else {
+                                    // UPDATE: Just update the view count
+                                    metadata.viewCount = view_count_edit;
+                                    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+                                    console.log(`✅ Updated view count for ${image_filename} to ${view_count_edit}`);
+                                }
                                 break;
                             }
                         }
                     } catch (e) {
-                        console.warn(`Failed to apply view count update for ${image_filename}:`, e.message);
+                        console.warn(`Failed to apply ${isRevoke ? 'revocation' : 'view count update'} for ${image_filename}:`, e.message);
                     }
                 }
             }
@@ -698,11 +708,12 @@ app.post('/api/update-view-count', async (req, res) => {
         const { recipient, image, viewCount } = req.body;
         const sender = req.session.username;
 
-        if (!recipient || !image || !viewCount) {
+        if (!recipient || !image || viewCount === undefined || viewCount === null) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        console.log(`🔄 Updating view count for ${image} (${recipient}) to ${viewCount}`);
+        const isRevoke = parseInt(viewCount) === 0;
+        console.log(`🔄 ${isRevoke ? '🚫 REVOKING' : 'Updating view count for'} ${image} (${recipient}) ${isRevoke ? '' : 'to ' + viewCount}`);
 
         // Try to update via P2P first
         const usersResponse = await broadcastRequest('/users', { method: 'GET' });
@@ -750,7 +761,9 @@ app.post('/api/update-view-count', async (req, res) => {
 
         res.json({
             success: true,
-            message: p2pSuccess ? 'View count updated immediately' : 'View count will update when recipient logs in'
+            message: isRevoke 
+                ? (p2pSuccess ? 'Access revoked immediately' : 'Access will be revoked when recipient logs in')
+                : (p2pSuccess ? 'View count updated immediately' : 'View count will update when recipient logs in')
         });
 
     } catch (e) {
@@ -790,12 +803,13 @@ app.get('/api/requests', async (req, res) => {
     }
 });
 
-// P2P endpoint: update view count for local viewable image
+// P2P endpoint: update view count for local viewable image (viewCount=0 means REVOKE/DELETE)
 app.post('/update-local-view-count', async (req, res) => {
     try {
         const { image, viewCount } = req.body;
+        const isRevoke = parseInt(viewCount) === 0;
 
-        console.log(`🔄 [P2P UPDATE] Received request to update "${image}" to viewCount=${viewCount}`);
+        console.log(`🔄 [P2P UPDATE] Received request to ${isRevoke ? '🚫 REVOKE' : 'update'} "${image}" ${isRevoke ? '' : 'to viewCount=' + viewCount}`);
 
         const dataDir = path.join(__dirname, 'data');
         const users = await fs.readdir(dataDir).catch(() => []);
@@ -818,11 +832,21 @@ app.post('/update-local-view-count', async (req, res) => {
 
                     // Match by originalImage field
                     if (metadata.originalImage === image) {
-                        const oldCount = metadata.viewCount;
-                        metadata.viewCount = parseInt(viewCount);
-                        await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-                        console.log(`✅ [P2P UPDATE] SUCCESS! Updated ${file} from ${oldCount} to ${viewCount} for user ${username}`);
-                        return res.json({ success: true });
+                        if (isRevoke) {
+                            // REVOKE: Delete both the steg image and metadata
+                            const stegImagePath = metadataPath.replace('.json', '');
+                            await fs.unlink(metadataPath).catch(() => {});
+                            await fs.unlink(stegImagePath).catch(() => {});
+                            console.log(`🚫 [P2P REVOKE] DELETED ${file} and metadata for user ${username}`);
+                            return res.json({ success: true, revoked: true });
+                        } else {
+                            // UPDATE: Just update the view count
+                            const oldCount = metadata.viewCount;
+                            metadata.viewCount = parseInt(viewCount);
+                            await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+                            console.log(`✅ [P2P UPDATE] SUCCESS! Updated ${file} from ${oldCount} to ${viewCount} for user ${username}`);
+                            return res.json({ success: true });
+                        }
                     }
                 }
             } catch (e) {
