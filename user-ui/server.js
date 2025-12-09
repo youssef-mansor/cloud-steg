@@ -31,7 +31,7 @@ app.use(session({
 // Multer for image uploads
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max (for large cover images)
     fileFilter: (req, file, cb) => {
         if (file.mimetype.startsWith('image/')) {
             cb(null, true);
