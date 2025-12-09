@@ -684,15 +684,17 @@ console.log('🚀 Cloud Steg User Dashboard loaded');
 // Track approved requests (stored when approving)
 let approvedRequests = [];
 
-// Load approved requests from localStorage
+// Load approved requests from localStorage (user-specific)
 function loadApprovedRequests() {
-    const stored = localStorage.getItem('approvedRequests');
+    const key = `approvedRequests_${currentUser}`;
+    const stored = localStorage.getItem(key);
     return stored ? JSON.parse(stored) : [];
 }
 
-// Save approved requests to localStorage
+// Save approved requests to localStorage (user-specific)
 function saveApprovedRequests(requests) {
-    localStorage.setItem('approvedRequests', JSON.stringify(requests));
+    const key = `approvedRequests_${currentUser}`;
+    localStorage.setItem(key, JSON.stringify(requests));
 }
 
 // Display approved requests

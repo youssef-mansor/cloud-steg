@@ -327,11 +327,22 @@ app.get('/api/my-images', async (req, res) => {
             serverThumbnails = [];
         }
 
+        // Only include server thumbnails that have corresponding local originals
+        // Extract timestamp from original: "1234567890-original-name.png" -> "1234567890"
+        const localTimestamps = new Set(localOriginals.map(f => f.split('-original-')[0]));
+        
+        // Filter server thumbnails to only those with local originals
+        const validServerThumbnails = serverThumbnails.filter(thumb => {
+            // Extract timestamp from thumbnail: "1234567890-thumb-name.png" -> "1234567890"
+            const thumbTimestamp = thumb.split('-thumb-')[0];
+            return localTimestamps.has(thumbTimestamp);
+        });
+
         res.json({
             local_images: localOriginals,
-            server_thumbnails: serverThumbnails,
+            server_thumbnails: validServerThumbnails,
             local_count: localOriginals.length,
-            server_count: serverThumbnails.length
+            server_count: validServerThumbnails.length
         });
 
     } catch (e) {
