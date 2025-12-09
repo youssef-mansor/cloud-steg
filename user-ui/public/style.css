@@ -147,6 +147,20 @@ button {
     border-color: var(--accent-primary);
 }
 
+.btn-danger {
+    padding: 0.625rem 1.25rem;
+    background: #dc3545;
+    color: white;
+    border: 1px solid #dc3545;
+    border-radius: 8px;
+    font-size: 0.875rem;
+}
+
+.btn-danger:hover {
+    background: #c82333;
+    border-color: #bd2130;
+}
+
 /* ============== Dashboard Header ============== */
 
 .dashboard-header {

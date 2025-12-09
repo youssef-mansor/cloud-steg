@@ -719,6 +719,9 @@ async function displayApprovedRequests() {
                     <button class="btn-secondary" onclick="editViewCount('${req.recipient}', '${req.image}', ${req.viewCount})">
                         ✏️ Edit View Count
                     </button>
+                    <button class="btn-danger" onclick="revokeAccess('${req.recipient}', '${req.image}')" style="margin-left: 10px;">
+                        🚫 Revoke Access
+                    </button>
                 </div>
             </div>
         `;
@@ -777,6 +780,36 @@ async function updateViewCount() {
         displayApprovedRequests();
     } catch (e) {
         alert(`❌ Failed to update: ${e.message}`);
+    }
+}
+
+// Revoke access by setting view count to 0
+async function revokeAccess(recipient, image) {
+    if (!confirm(`⚠️ Revoke access for ${recipient} to "${image}"?\n\nThis will delete the image from their device.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/update-view-count', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipient, image, viewCount: 0 })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(data.error || 'Failed to revoke access');
+
+        // Remove from local storage
+        approvedRequests = approvedRequests.filter(req => 
+            !(req.recipient === recipient && req.image === image)
+        );
+        saveApprovedRequests(approvedRequests);
+
+        alert(`✅ Access revoked successfully!`);
+        displayApprovedRequests();
+    } catch (e) {
+        alert(`❌ Failed to revoke: ${e.message}`);
     }
 }
 
