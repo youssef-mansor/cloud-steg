@@ -43,30 +43,30 @@ impl<'a> NoteStorage<'a> {
         self.user_directory.get_user(target_username).await?;
 
         // 2. Verify target image exists
-        let image_path = format!("users/{}/images/{}", target_username, target_image);
+        // let image_path = format!("users/{}/images/{}", target_username, target_image);
         
-        match self
-            .user_directory
-            .get_client()
-            .object()
-            .download(self.user_directory.get_bucket_name(), &image_path)
-            .await
-        {
-            Ok(_) => {} // Image exists
-            Err(e) => {
-                if e.to_string().contains("404") || e.to_string().contains("No such object") {
-                    return Err(RegistrationError::ValidationError(format!(
-                        "Image not found: {}",
-                        target_image
-                    )));
-                } else {
-                    return Err(RegistrationError::FirebaseApiError(format!(
-                        "Error checking image: {}",
-                        e
-                    )));
-                }
-            }
-        }
+        // match self
+        //     .user_directory
+        //     .get_client()
+        //     .object()
+        //     .download(self.user_directory.get_bucket_name(), &image_path)
+        //     .await
+        // {
+        //     Ok(_) => {} // Image exists
+        //     Err(e) => {
+        //         if e.to_string().contains("404") || e.to_string().contains("No such object") {
+        //             return Err(RegistrationError::ValidationError(format!(
+        //                 "Image not found: {}",
+        //                 target_image
+        //             )));
+        //         } else {
+        //             return Err(RegistrationError::FirebaseApiError(format!(
+        //                 "Error checking image: {}",
+        //                 e
+        //             )));
+        //         }
+        //     }
+        // }
 
         // 3. Create note object
         let note = ImageNote {
